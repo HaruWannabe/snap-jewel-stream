@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Settings, Lock, Unlock, AlertCircle } from 'lucide-react';
+import { Camera, Settings, Lock, Unlock, AlertCircle, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { useCamera } from '@/hooks/useCamera';
 import { getPrefixes, savePhoto, checkFilenameExists, getTodayCount, PrefixItem } from '@/lib/storage';
 import { detectBlur } from '@/lib/blur-detection';
 import { BlurWarningDialog } from './BlurWarningDialog';
 import { DuplicateWarningDialog } from './DuplicateWarningDialog';
+import { PhotoPreviewDialog } from './PhotoPreviewDialog';
 import { cn } from '@/lib/utils';
 
 interface CameraViewProps {
@@ -37,6 +40,10 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
   const [todayCount, setTodayCount] = useState(0);
   const [isCapturing, setIsCapturing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  
+  // Preview mode
+  const [previewEnabled, setPreviewEnabled] = useState(false);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   
   // Dialogs
   const [blurDialogOpen, setBlurDialogOpen] = useState(false);
@@ -88,11 +95,19 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
         return;
       }
       
-      // Check for duplicate
+      // Check for duplicate first
       const exists = await checkFilenameExists(selectedPrefix, tagNumber);
       if (exists) {
         setPendingBlob(blob);
         setDuplicateDialogOpen(true);
+        setIsCapturing(false);
+        return;
+      }
+      
+      // If preview mode is enabled, show preview dialog
+      if (previewEnabled) {
+        setPendingBlob(blob);
+        setPreviewDialogOpen(true);
         setIsCapturing(false);
         return;
       }
@@ -113,6 +128,28 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
       console.error('Capture error:', err);
       setIsCapturing(false);
     }
+  };
+  
+  // Handle preview confirm (with optional crop)
+  const handlePreviewConfirm = async (croppedBlob: Blob) => {
+    setPreviewDialogOpen(false);
+    
+    // Still check for blur on the final image
+    const { isBlurry, score } = await detectBlur(croppedBlob);
+    if (isBlurry) {
+      setPendingBlob(croppedBlob);
+      setBlurScore(score);
+      setBlurDialogOpen(true);
+      return;
+    }
+    
+    await savePhotoAndReset(croppedBlob, false);
+  };
+  
+  const handlePreviewCancel = () => {
+    setPreviewDialogOpen(false);
+    setPendingBlob(null);
+    tagInputRef.current?.focus();
   };
 
   const savePhotoAndReset = async (blob: Blob, overwrite: boolean) => {
@@ -189,9 +226,20 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
           <Camera className="h-5 w-5 text-primary" />
           <span className="font-medium">Today: {todayCount} photos</span>
         </div>
-        <Button variant="ghost" size="icon" onClick={onOpenSettings}>
-          <Settings className="h-5 w-5" />
-        </Button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Eye className="h-4 w-4 text-muted-foreground" />
+            <Label htmlFor="preview-mode" className="text-sm">Preview</Label>
+            <Switch
+              id="preview-mode"
+              checked={previewEnabled}
+              onCheckedChange={setPreviewEnabled}
+            />
+          </div>
+          <Button variant="ghost" size="icon" onClick={onOpenSettings}>
+            <Settings className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
       
       {/* Camera preview */}
@@ -316,6 +364,14 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
         filename={filename}
         onConfirm={handleDuplicateConfirm}
         onCancel={handleDuplicateCancel}
+      />
+      
+      <PhotoPreviewDialog
+        open={previewDialogOpen}
+        imageBlob={pendingBlob}
+        filename={filename}
+        onConfirm={handlePreviewConfirm}
+        onCancel={handlePreviewCancel}
       />
     </div>
   );
