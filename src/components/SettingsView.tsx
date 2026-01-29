@@ -19,7 +19,7 @@ import {
   getAllPhotos,
   PrefixItem,
 } from '@/lib/storage';
-import { exportAllPhotos } from '@/lib/export';
+import { EXPORT_BATCH_SIZE, exportPhotoBatch, type ExportablePhoto } from '@/lib/export';
 import { useToast } from '@/hooks/use-toast';
 
 interface SettingsViewProps {
@@ -34,8 +34,15 @@ export function SettingsView({ onBack }: SettingsViewProps) {
   const [newName, setNewName] = useState('');
   const [storageInfo, setStorageInfo] = useState({ count: 0, sizeBytes: 0 });
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isPreparingExport, setIsPreparingExport] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportingBatchIndex, setExportingBatchIndex] = useState<number | null>(null);
   const [exportProgress, setExportProgress] = useState({ current: 0, total: 0 });
+  const [exportPlan, setExportPlan] = useState<{
+    photos: ExportablePhoto[];
+    batchSize: number;
+    batchCount: number;
+  } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -95,40 +102,79 @@ export function SettingsView({ onBack }: SettingsViewProps) {
     });
   };
 
-  const handleExport = async () => {
-    const photos = await getAllPhotos();
-    if (photos.length === 0) {
+  const handlePrepareExport = async () => {
+    setIsPreparingExport(true);
+    try {
+      const photos = await getAllPhotos();
+      if (photos.length === 0) {
+        setExportPlan(null);
+        toast({
+          title: 'No photos',
+          description: 'There are no photos to export.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const exportable: ExportablePhoto[] = photos.map((p) => ({
+        id: p.id,
+        filename: p.filename,
+      }));
+      const batchSize = EXPORT_BATCH_SIZE;
+      const batchCount = Math.ceil(exportable.length / batchSize);
+
+      setExportPlan({ photos: exportable, batchSize, batchCount });
       toast({
-        title: 'No photos',
-        description: 'There are no photos to export.',
+        title: 'Export ready',
+        description: `Your export is split into ${batchCount} ZIP file${batchCount === 1 ? '' : 's'} (${batchSize} photos per batch).`,
+      });
+    } catch (err) {
+      console.error('Prepare export error:', err);
+      toast({
+        title: 'Export setup failed',
+        description: 'Failed to prepare batches. Please try again.',
         variant: 'destructive',
       });
-      return;
+    } finally {
+      setIsPreparingExport(false);
     }
-    
+  };
+
+  const handleDownloadBatch = async (batchIndex: number) => {
+    if (!exportPlan) return;
+
+    const start = batchIndex * exportPlan.batchSize;
+    const end = Math.min(start + exportPlan.batchSize, exportPlan.photos.length);
+    const batchPhotos = exportPlan.photos.slice(start, end);
+    if (batchPhotos.length === 0) return;
+
     setIsExporting(true);
-    setExportProgress({ current: 0, total: photos.length });
-    
+    setExportingBatchIndex(batchIndex);
+    setExportProgress({ current: 0, total: batchPhotos.length });
+
     try {
-      const result = await exportAllPhotos((current, total) => {
-        setExportProgress({ current, total });
+      const result = await exportPhotoBatch(batchPhotos, {
+        batchIndex,
+        batchCount: exportPlan.batchCount,
+        onProgress: (current, total) => setExportProgress({ current, total }),
       });
-      
+
       if (result.success) {
         toast({
-          title: 'Export complete',
-          description: `${result.count} photos exported successfully.`,
+          title: 'Batch exported',
+          description: `Batch ${batchIndex + 1} downloaded (${result.count} photos).`,
         });
       }
     } catch (err) {
-      console.error('Export error:', err);
+      console.error('Batch export error:', err);
       toast({
         title: 'Export failed',
-        description: 'Failed to export photos. Please try again.',
+        description: `Failed to export Batch ${batchIndex + 1}. Please try again.`,
         variant: 'destructive',
       });
     } finally {
       setIsExporting(false);
+      setExportingBatchIndex(null);
       setExportProgress({ current: 0, total: 0 });
     }
   };
@@ -244,17 +290,50 @@ export function SettingsView({ onBack }: SettingsViewProps) {
           </CardHeader>
           <CardContent className="space-y-3">
             <Button
-              onClick={handleExport}
-              disabled={isExporting || storageInfo.count === 0}
+              onClick={handlePrepareExport}
+              disabled={isPreparingExport || isExporting || storageInfo.count === 0}
               className="w-full"
               variant="outline"
             >
               <Download className="h-4 w-4 mr-2" />
-              {isExporting 
-                ? `Exporting... ${exportProgress.current}/${exportProgress.total}`
-                : `Export All Photos (${storageInfo.count})`
-              }
+              {isPreparingExport
+                ? 'Preparing batches...'
+                : exportPlan
+                  ? `Refresh Export Batches (${exportPlan.batchCount})`
+                  : `Prepare Export Batches (${storageInfo.count})`}
             </Button>
+
+            {exportPlan && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Download each ZIP one-by-one to avoid iPhone memory crashes. ({exportPlan.batchSize} photos per batch)
+                </p>
+
+                <div className="space-y-2">
+                  {Array.from({ length: exportPlan.batchCount }).map((_, idx) => {
+                    const start = idx * exportPlan.batchSize;
+                    const end = Math.min(start + exportPlan.batchSize, exportPlan.photos.length);
+                    const count = Math.max(0, end - start);
+                    const isThisBatch = exportingBatchIndex === idx;
+
+                    return (
+                      <Button
+                        key={idx}
+                        onClick={() => handleDownloadBatch(idx)}
+                        disabled={isPreparingExport || isExporting}
+                        className="w-full"
+                        variant="secondary"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        {isThisBatch
+                          ? `Exporting Batch ${idx + 1}... ${exportProgress.current}/${exportProgress.total}`
+                          : `Download Batch ${idx + 1} (${count})`}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             
             <Button
               onClick={() => setShowDeleteDialog(true)}
