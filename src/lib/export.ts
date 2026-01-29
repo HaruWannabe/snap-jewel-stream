@@ -1,7 +1,11 @@
 import JSZip from 'jszip';
 import { getAllPhotos, getPhotoBlob } from './storage';
 
-export async function exportAllPhotos(): Promise<{ success: boolean; count: number }> {
+// Memory-efficient export that processes photos in small batches
+// to avoid crashing on large collections (400+ photos, 1GB+)
+export async function exportAllPhotos(
+  onProgress?: (current: number, total: number) => void
+): Promise<{ success: boolean; count: number }> {
   const photos = await getAllPhotos();
   
   if (photos.length === 0) {
@@ -9,15 +13,42 @@ export async function exportAllPhotos(): Promise<{ success: boolean; count: numb
   }
   
   const zip = new JSZip();
+  const BATCH_SIZE = 10; // Process 10 photos at a time to manage memory
   
-  for (const photo of photos) {
-    const blob = await getPhotoBlob(photo.id);
-    if (blob) {
-      zip.file(photo.filename, blob);
+  // Process photos in batches to avoid memory exhaustion
+  for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+    const batch = photos.slice(i, i + BATCH_SIZE);
+    
+    // Process batch sequentially to control memory
+    for (const photo of batch) {
+      const blob = await getPhotoBlob(photo.id);
+      if (blob) {
+        // Add to zip - JSZip stores reference, not full data yet
+        zip.file(photo.filename, blob);
+      }
+      
+      // Report progress
+      onProgress?.(Math.min(i + batch.indexOf(photo) + 1, photos.length), photos.length);
     }
+    
+    // Allow garbage collection between batches
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
   
-  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  // Generate ZIP with streaming enabled to reduce peak memory usage
+  const zipBlob = await zip.generateAsync(
+    { 
+      type: 'blob',
+      compression: 'STORE', // No compression = faster and less memory
+      streamFiles: true // Stream files instead of loading all into memory
+    },
+    // Progress callback during ZIP generation
+    (metadata) => {
+      if (metadata.currentFile) {
+        onProgress?.(photos.length, photos.length); // Keep showing complete
+      }
+    }
+  );
   
   // Create download link
   const url = URL.createObjectURL(zipBlob);

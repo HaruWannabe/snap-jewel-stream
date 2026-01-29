@@ -35,6 +35,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
   const [storageInfo, setStorageInfo] = useState({ count: 0, sizeBytes: 0 });
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState({ current: 0, total: 0 });
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -106,8 +107,13 @@ export function SettingsView({ onBack }: SettingsViewProps) {
     }
     
     setIsExporting(true);
+    setExportProgress({ current: 0, total: photos.length });
+    
     try {
-      const result = await exportAllPhotos();
+      const result = await exportAllPhotos((current, total) => {
+        setExportProgress({ current, total });
+      });
+      
       if (result.success) {
         toast({
           title: 'Export complete',
@@ -115,6 +121,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
         });
       }
     } catch (err) {
+      console.error('Export error:', err);
       toast({
         title: 'Export failed',
         description: 'Failed to export photos. Please try again.',
@@ -122,6 +129,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
       });
     } finally {
       setIsExporting(false);
+      setExportProgress({ current: 0, total: 0 });
     }
   };
 
@@ -242,7 +250,10 @@ export function SettingsView({ onBack }: SettingsViewProps) {
               variant="outline"
             >
               <Download className="h-4 w-4 mr-2" />
-              {isExporting ? 'Exporting...' : `Export All Photos (${storageInfo.count})`}
+              {isExporting 
+                ? `Exporting... ${exportProgress.current}/${exportProgress.total}`
+                : `Export All Photos (${storageInfo.count})`
+              }
             </Button>
             
             <Button
