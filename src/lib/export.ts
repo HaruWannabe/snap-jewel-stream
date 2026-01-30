@@ -95,57 +95,96 @@ export async function exportPhotoBatch(
   return { success: true, count: photos.length, filename };
 }
 
-// Memory-efficient export that processes photos in small batches
-// to avoid crashing on large collections (400+ photos, 1GB+)
-export async function exportAllPhotos(
-  onProgress?: (current: number, total: number) => void
-): Promise<{ success: boolean; count: number }> {
-  const photos = await getAllPhotos();
-  
-  if (photos.length === 0) {
-    return { success: false, count: 0 };
+// Share all batches sequentially to WhatsApp/Telegram/etc
+// Each batch is generated, shared via share sheet, then memory is freed before next batch
+export async function exportAndShareAllBatches(
+  photos: ExportablePhoto[],
+  batchSize: number,
+  callbacks?: {
+    onBatchStart?: (batchIndex: number, batchCount: number, photosInBatch: number) => void;
+    onPhotoProgress?: (current: number, total: number) => void;
+    onBatchComplete?: (batchIndex: number) => void;
   }
-  
-  const zip = new JSZip();
-  const BATCH_SIZE = 10; // legacy single-zip path
-  
-  // Process photos in batches to avoid memory exhaustion
-  for (let i = 0; i < photos.length; i += BATCH_SIZE) {
-    const batch = photos.slice(i, i + BATCH_SIZE);
-    
-    // Process batch sequentially to control memory
-    for (const photo of batch) {
+): Promise<{ success: boolean; batchesShared: number; totalPhotos: number }> {
+  if (photos.length === 0) {
+    return { success: false, batchesShared: 0, totalPhotos: 0 };
+  }
+
+  const batchCount = Math.ceil(photos.length / batchSize);
+  let batchesShared = 0;
+  let totalPhotosShared = 0;
+
+  for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+    const start = batchIndex * batchSize;
+    const end = Math.min(start + batchSize, photos.length);
+    const batchPhotos = photos.slice(start, end);
+
+    callbacks?.onBatchStart?.(batchIndex, batchCount, batchPhotos.length);
+
+    // Generate this batch's ZIP
+    const zip = new JSZip();
+    const YIELD_EVERY = 10;
+
+    for (let i = 0; i < batchPhotos.length; i++) {
+      const photo = batchPhotos[i];
       const blob = await getPhotoBlob(photo.id);
       if (blob) {
-        // Add to zip - JSZip stores reference, not full data yet
         zip.file(photo.filename, blob);
       }
-      
-      // Report progress
-      onProgress?.(Math.min(i + batch.indexOf(photo) + 1, photos.length), photos.length);
-    }
-    
-    // Allow garbage collection between batches
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  
-  // Generate ZIP with streaming enabled to reduce peak memory usage
-  const zipBlob = await zip.generateAsync(
-    { 
-      type: 'blob',
-      compression: 'STORE', // No compression = faster and less memory
-      streamFiles: true // Stream files instead of loading all into memory
-    },
-    // Progress callback during ZIP generation
-    (metadata) => {
-      if (metadata.currentFile) {
-        onProgress?.(photos.length, photos.length); // Keep showing complete
+
+      callbacks?.onPhotoProgress?.(i + 1, batchPhotos.length);
+
+      if ((i + 1) % YIELD_EVERY === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
-  );
-  
-  const filename = buildZipName({});
-  await shareOrDownloadZip(zipBlob, filename);
-  
-  return { success: true, count: photos.length };
+
+    const filename = buildZipName({ batchIndex, batchCount });
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'STORE',
+      streamFiles: true,
+    });
+
+    // Try to share via share sheet
+    const file = new File([zipBlob], filename, { type: 'application/zip' });
+    const canShare = navigator.share && navigator.canShare?.({ files: [file] });
+
+    if (canShare) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: `Jewellery Photos - Batch ${batchIndex + 1} of ${batchCount}`,
+        });
+        batchesShared++;
+        totalPhotosShared += batchPhotos.length;
+        callbacks?.onBatchComplete?.(batchIndex);
+      } catch (err) {
+        // User cancelled - stop the process
+        if ((err as Error).name === 'AbortError') {
+          return { success: batchesShared > 0, batchesShared, totalPhotos: totalPhotosShared };
+        }
+        // Other error - try to continue with next batch
+        console.error(`Failed to share batch ${batchIndex + 1}:`, err);
+      }
+    } else {
+      // Fallback: download if sharing not supported
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      batchesShared++;
+      totalPhotosShared += batchPhotos.length;
+      callbacks?.onBatchComplete?.(batchIndex);
+    }
+
+    // Allow garbage collection before next batch
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return { success: true, batchesShared, totalPhotos: totalPhotosShared };
 }

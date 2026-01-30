@@ -326,27 +326,50 @@ export function PhotoPreviewDialog({
                       <div className="absolute top-2/3 left-0 right-0 h-px bg-primary/50" />
                     </div>
                     
-                    {/* Resize handles */}
+                    {/* Resize handles - large touch targets for mobile */}
                     {['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'].map((handle) => {
-                      const positions: Record<string, React.CSSProperties> = {
-                        nw: { top: -6, left: -6, cursor: 'nw-resize' },
-                        n: { top: -6, left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize' },
-                        ne: { top: -6, right: -6, cursor: 'ne-resize' },
-                        w: { top: '50%', left: -6, transform: 'translateY(-50%)', cursor: 'w-resize' },
-                        e: { top: '50%', right: -6, transform: 'translateY(-50%)', cursor: 'e-resize' },
-                        sw: { bottom: -6, left: -6, cursor: 'sw-resize' },
-                        s: { bottom: -6, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize' },
-                        se: { bottom: -6, right: -6, cursor: 'se-resize' },
+                      // Visible handle positions (centered on corner/edge)
+                      const visiblePositions: Record<string, React.CSSProperties> = {
+                        nw: { top: -10, left: -10 },
+                        n: { top: -10, left: '50%', transform: 'translateX(-50%)' },
+                        ne: { top: -10, right: -10 },
+                        w: { top: '50%', left: -10, transform: 'translateY(-50%)' },
+                        e: { top: '50%', right: -10, transform: 'translateY(-50%)' },
+                        sw: { bottom: -10, left: -10 },
+                        s: { bottom: -10, left: '50%', transform: 'translateX(-50%)' },
+                        se: { bottom: -10, right: -10 },
+                      };
+                      
+                      // Touch target positions (larger invisible hit area)
+                      const touchPositions: Record<string, React.CSSProperties> = {
+                        nw: { top: -22, left: -22, cursor: 'nw-resize' },
+                        n: { top: -22, left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize' },
+                        ne: { top: -22, right: -22, cursor: 'ne-resize' },
+                        w: { top: '50%', left: -22, transform: 'translateY(-50%)', cursor: 'w-resize' },
+                        e: { top: '50%', right: -22, transform: 'translateY(-50%)', cursor: 'e-resize' },
+                        sw: { bottom: -22, left: -22, cursor: 'sw-resize' },
+                        s: { bottom: -22, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize' },
+                        se: { bottom: -22, right: -22, cursor: 'se-resize' },
                       };
                       
                       return (
                         <div
                           key={handle}
-                          className="absolute w-3 h-3 bg-primary rounded-full border-2 border-background"
-                          style={positions[handle]}
-                          onMouseDown={(e) => handleMouseDown(e, 'resize', handle)}
-                          onTouchStart={(e) => handleMouseDown(e, 'resize', handle)}
-                        />
+                          className="absolute"
+                          style={touchPositions[handle]}
+                        >
+                          {/* Large invisible touch target (44x44 for iOS accessibility) */}
+                          <div
+                            className="w-11 h-11 flex items-center justify-center"
+                            onMouseDown={(e) => handleMouseDown(e, 'resize', handle)}
+                            onTouchStart={(e) => handleMouseDown(e, 'resize', handle)}
+                          >
+                            {/* Visible handle */}
+                            <div 
+                              className="w-5 h-5 bg-primary rounded-full border-2 border-background shadow-lg"
+                            />
+                          </div>
+                        </div>
                       );
                     })}
                   </div>

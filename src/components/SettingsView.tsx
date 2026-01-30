@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Trash2, Download, AlertTriangle, HardDrive } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Download, AlertTriangle, HardDrive, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,7 +19,7 @@ import {
   getAllPhotos,
   PrefixItem,
 } from '@/lib/storage';
-import { EXPORT_BATCH_SIZE, exportPhotoBatch, type ExportablePhoto } from '@/lib/export';
+import { EXPORT_BATCH_SIZE, exportPhotoBatch, exportAndShareAllBatches, type ExportablePhoto } from '@/lib/export';
 import { useToast } from '@/hooks/use-toast';
 
 interface SettingsViewProps {
@@ -44,6 +44,8 @@ export function SettingsView({ onBack }: SettingsViewProps) {
     batchCount: number;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSharingAll, setIsSharingAll] = useState(false);
+  const [sharingProgress, setSharingProgress] = useState({ currentBatch: 0, totalBatches: 0, photosInBatch: 0, totalPhotosInBatch: 0 });
 
   useEffect(() => {
     loadData();
@@ -179,6 +181,57 @@ export function SettingsView({ onBack }: SettingsViewProps) {
     }
   };
 
+  const handleShareAllBatches = async () => {
+    if (!exportPlan) return;
+
+    setIsSharingAll(true);
+    setSharingProgress({ currentBatch: 0, totalBatches: exportPlan.batchCount, photosInBatch: 0, totalPhotosInBatch: 0 });
+
+    try {
+      const result = await exportAndShareAllBatches(exportPlan.photos, exportPlan.batchSize, {
+        onBatchStart: (batchIndex, batchCount, photosInBatch) => {
+          setSharingProgress(prev => ({
+            ...prev,
+            currentBatch: batchIndex + 1,
+            totalBatches: batchCount,
+            totalPhotosInBatch: photosInBatch,
+            photosInBatch: 0,
+          }));
+        },
+        onPhotoProgress: (current, total) => {
+          setSharingProgress(prev => ({
+            ...prev,
+            photosInBatch: current,
+            totalPhotosInBatch: total,
+          }));
+        },
+        onBatchComplete: (batchIndex) => {
+          toast({
+            title: `Batch ${batchIndex + 1} shared`,
+            description: `Successfully shared batch ${batchIndex + 1} of ${exportPlan.batchCount}.`,
+          });
+        },
+      });
+
+      if (result.success) {
+        toast({
+          title: 'All batches shared!',
+          description: `Successfully shared ${result.batchesShared} ZIP files with ${result.totalPhotos} photos.`,
+        });
+      }
+    } catch (err) {
+      console.error('Share all batches error:', err);
+      toast({
+        title: 'Sharing failed',
+        description: 'Failed to share batches. Please try downloading individually.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSharingAll(false);
+      setSharingProgress({ currentBatch: 0, totalBatches: 0, photosInBatch: 0, totalPhotosInBatch: 0 });
+    }
+  };
+
   const handleDeleteAll = async () => {
     setIsDeleting(true);
     try {
@@ -309,6 +362,19 @@ export function SettingsView({ onBack }: SettingsViewProps) {
                   Download each ZIP one-by-one to avoid iPhone memory crashes. ({exportPlan.batchSize} photos per batch)
                 </p>
 
+                {/* Share All Batches Button */}
+                <Button
+                  onClick={handleShareAllBatches}
+                  disabled={isPreparingExport || isExporting || isSharingAll}
+                  className="w-full"
+                  variant="default"
+                >
+                  <Share2 className="h-4 w-4 mr-2" />
+                  {isSharingAll
+                    ? `Sharing Batch ${sharingProgress.currentBatch}/${sharingProgress.totalBatches}... (${sharingProgress.photosInBatch}/${sharingProgress.totalPhotosInBatch})`
+                    : `Share All ${exportPlan.batchCount} Batches to WhatsApp/Telegram`}
+                </Button>
+
                 <div className="space-y-2">
                   {Array.from({ length: exportPlan.batchCount }).map((_, idx) => {
                     const start = idx * exportPlan.batchSize;
@@ -320,7 +386,7 @@ export function SettingsView({ onBack }: SettingsViewProps) {
                       <Button
                         key={idx}
                         onClick={() => handleDownloadBatch(idx)}
-                        disabled={isPreparingExport || isExporting}
+                        disabled={isPreparingExport || isExporting || isSharingAll}
                         className="w-full"
                         variant="secondary"
                       >
