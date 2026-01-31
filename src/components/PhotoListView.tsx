@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Eye, RotateCcw, Trash2, Image } from 'lucide-react';
+import { ArrowLeft, Eye, RotateCcw, Trash2, Image, Search, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   AlertDialog,
@@ -17,8 +18,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
-import { getAllPhotos, getPhotoBlob, deletePhoto, type PhotoMetadata } from '@/lib/storage';
+import { Label } from '@/components/ui/label';
+import { getAllPhotos, getPhotoBlob, deletePhoto, renamePhoto, type PhotoMetadata } from '@/lib/storage';
 
 interface PhotoListViewProps {
   onBack: () => void;
@@ -30,6 +33,7 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
   const [loading, setLoading] = useState(true);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // View dialog
   const [viewingPhoto, setViewingPhoto] = useState<PhotoMetadata | null>(null);
@@ -40,6 +44,10 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
   
   // Retake confirmation
   const [retakingPhoto, setRetakingPhoto] = useState<PhotoMetadata | null>(null);
+  
+  // Rename dialog
+  const [renamingPhoto, setRenamingPhoto] = useState<PhotoMetadata | null>(null);
+  const [newTagNumber, setNewTagNumber] = useState('');
 
   useEffect(() => {
     loadPhotos();
@@ -141,13 +149,41 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
     a[0].localeCompare(b[0])
   );
 
-  // Filter photos based on active filter (read-only, display only)
-  const filteredPhotos = activeFilter 
-    ? photos.filter(photo => photo.prefix === activeFilter)
-    : photos;
+  // Filter photos based on active filter and search query (read-only, display only)
+  const filteredPhotos = photos.filter(photo => {
+    const matchesFilter = !activeFilter || photo.prefix === activeFilter;
+    const matchesSearch = !searchQuery || 
+      photo.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      photo.tagNumber.includes(searchQuery);
+    return matchesFilter && matchesSearch;
+  });
 
   const handleFilterClick = (prefix: string) => {
     setActiveFilter(prev => prev === prefix ? null : prefix);
+  };
+
+  const handleRenameClick = (photo: PhotoMetadata) => {
+    setRenamingPhoto(photo);
+    setNewTagNumber(photo.tagNumber);
+  };
+
+  const handleRenameConfirm = async () => {
+    if (!renamingPhoto || !newTagNumber.trim()) return;
+    
+    const result = await renamePhoto(renamingPhoto.id, newTagNumber.trim());
+    if (result.success) {
+      // Update local state with new metadata
+      setPhotos(prev => prev.map(p => 
+        p.id === renamingPhoto.id 
+          ? { ...p, tagNumber: newTagNumber.trim(), filename: `${p.prefix}${newTagNumber.trim()}.jpg` }
+          : p
+      ));
+      setRenamingPhoto(null);
+      setNewTagNumber('');
+    } else if (result.exists) {
+      // Show error - filename already exists
+      alert(`Tag number ${newTagNumber} already exists for ${renamingPhoto.prefix}`);
+    }
   };
 
   return (
@@ -162,6 +198,22 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
           <p className="text-sm text-muted-foreground">{photos.length} photos</p>
         </div>
       </div>
+
+      {/* Search Bar */}
+      {!loading && photos.length > 0 && (
+        <div className="px-4 py-3 bg-card border-b border-border">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Search by tag number..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Category Breakdown - Clickable Filters */}
       {!loading && photos.length > 0 && (
@@ -261,6 +313,14 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
                   <Button
                     variant="ghost"
                     size="icon"
+                    onClick={() => handleRenameClick(photo)}
+                    title="Rename"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => setRetakingPhoto(photo)}
                     title="Retake"
                   >
@@ -339,6 +399,48 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Rename Dialog */}
+      <Dialog open={!!renamingPhoto} onOpenChange={(open) => !open && setRenamingPhoto(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Photo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Current filename</Label>
+              <p className="font-mono text-sm text-muted-foreground">{renamingPhoto?.filename}</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-tag">New tag number</Label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm text-muted-foreground">{renamingPhoto?.prefix}</span>
+                <Input
+                  id="new-tag"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={newTagNumber}
+                  onChange={(e) => setNewTagNumber(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="font-mono"
+                  placeholder="Enter tag number"
+                />
+              </div>
+              {newTagNumber && renamingPhoto && (
+                <p className="text-sm text-muted-foreground">
+                  New filename: <span className="font-mono">{renamingPhoto.prefix}{newTagNumber}.jpg</span>
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenamingPhoto(null)}>Cancel</Button>
+            <Button onClick={handleRenameConfirm} disabled={!newTagNumber.trim()}>
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

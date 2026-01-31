@@ -111,6 +111,37 @@ export async function getAllPhotos(): Promise<PhotoMetadata[]> {
 
 export type { PhotoMetadata };
 
+export async function renamePhoto(
+  id: string,
+  newTagNumber: string
+): Promise<{ success: boolean; exists?: boolean }> {
+  const database = await getDB();
+  
+  // Get existing photo
+  const photo = await database.get('photos', id);
+  if (!photo) {
+    return { success: false };
+  }
+  
+  const newFilename = `${photo.prefix}${newTagNumber}.jpg`;
+  
+  // Check if new filename already exists (different photo)
+  const existing = await database.getFromIndex('photos', 'by-filename', newFilename);
+  if (existing && existing.id !== id) {
+    return { success: false, exists: true };
+  }
+  
+  // Update metadata
+  const updatedPhoto: PhotoMetadata = {
+    ...photo,
+    tagNumber: newTagNumber,
+    filename: newFilename,
+  };
+  
+  await database.put('photos', updatedPhoto);
+  return { success: true };
+}
+
 export async function deletePhoto(id: string): Promise<void> {
   const database = await getDB();
   const tx = database.transaction(['photos', 'blobs'], 'readwrite');
