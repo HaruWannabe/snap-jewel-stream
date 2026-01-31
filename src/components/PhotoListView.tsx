@@ -129,6 +129,17 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
     return new Date(timestamp).toLocaleString();
   };
 
+  // Calculate category counts (read-only aggregation)
+  const categoryCounts = photos.reduce<Record<string, number>>((acc, photo) => {
+    acc[photo.prefix] = (acc[photo.prefix] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Sort categories alphabetically
+  const sortedCategories = Object.entries(categoryCounts).sort((a, b) => 
+    a[0].localeCompare(b[0])
+  );
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
@@ -141,6 +152,24 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
           <p className="text-sm text-muted-foreground">{photos.length} photos</p>
         </div>
       </div>
+
+      {/* Category Breakdown */}
+      {!loading && photos.length > 0 && (
+        <div className="px-4 py-3 bg-muted/50 border-b border-border">
+          <div className="flex flex-wrap gap-2">
+            {sortedCategories.map(([prefix, count]) => (
+              <div
+                key={prefix}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 text-primary rounded-full text-sm font-medium"
+              >
+                <span className="font-mono">{prefix}</span>
+                <span className="text-primary/70">-</span>
+                <span>{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Photo List */}
       <ScrollArea className="flex-1">
