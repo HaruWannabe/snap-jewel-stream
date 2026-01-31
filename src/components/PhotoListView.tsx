@@ -29,6 +29,7 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
   const [photos, setPhotos] = useState<PhotoMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
   
   // View dialog
   const [viewingPhoto, setViewingPhoto] = useState<PhotoMetadata | null>(null);
@@ -140,6 +141,15 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
     a[0].localeCompare(b[0])
   );
 
+  // Filter photos based on active filter (read-only, display only)
+  const filteredPhotos = activeFilter 
+    ? photos.filter(photo => photo.prefix === activeFilter)
+    : photos;
+
+  const handleFilterClick = (prefix: string) => {
+    setActiveFilter(prev => prev === prefix ? null : prefix);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
@@ -153,19 +163,34 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
         </div>
       </div>
 
-      {/* Category Breakdown */}
+      {/* Category Breakdown - Clickable Filters */}
       {!loading && photos.length > 0 && (
         <div className="px-4 py-3 bg-muted/50 border-b border-border">
           <div className="flex flex-wrap gap-2">
+            {/* Show All button when filter is active */}
+            {activeFilter && (
+              <button
+                onClick={() => setActiveFilter(null)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-full text-sm font-medium transition-colors hover:bg-secondary/80"
+              >
+                <span>All</span>
+                <span className="text-muted-foreground">({photos.length})</span>
+              </button>
+            )}
             {sortedCategories.map(([prefix, count]) => (
-              <div
+              <button
                 key={prefix}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 text-primary rounded-full text-sm font-medium"
+                onClick={() => handleFilterClick(prefix)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  activeFilter === prefix
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-primary/10 text-primary hover:bg-primary/20'
+                }`}
               >
                 <span className="font-mono">{prefix}</span>
-                <span className="text-primary/70">-</span>
+                <span className={activeFilter === prefix ? 'text-primary-foreground/70' : 'text-primary/70'}>-</span>
                 <span>{count}</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -186,8 +211,16 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
                 Start capturing to see them here
               </p>
             </div>
+          ) : filteredPhotos.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Image className="h-16 w-16 text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground">No photos in this category</p>
+              <p className="text-sm text-muted-foreground/70">
+                Tap "All" to see all photos
+              </p>
+            </div>
           ) : (
-            photos.map((photo) => (
+            filteredPhotos.map((photo) => (
               <div
                 key={photo.id}
                 className="flex items-center gap-3 p-3 bg-card rounded-lg border border-border"
