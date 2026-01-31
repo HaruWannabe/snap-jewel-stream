@@ -109,6 +109,18 @@ export async function getAllPhotos(): Promise<PhotoMetadata[]> {
   return database.getAll('photos');
 }
 
+export type { PhotoMetadata };
+
+export async function deletePhoto(id: string): Promise<void> {
+  const database = await getDB();
+  const tx = database.transaction(['photos', 'blobs'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('photos').delete(id),
+    tx.objectStore('blobs').delete(id),
+    tx.done,
+  ]);
+}
+
 export async function getPhotoBlob(id: string): Promise<Blob | undefined> {
   const database = await getDB();
   return database.get('blobs', id);
