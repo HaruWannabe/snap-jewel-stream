@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Settings, Lock, Unlock, AlertCircle, Eye } from 'lucide-react';
+import { Camera, Settings, Lock, Unlock, AlertCircle, Eye, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -11,6 +11,7 @@ import { detectBlur } from '@/lib/blur-detection';
 import { BlurWarningDialog } from './BlurWarningDialog';
 import { DuplicateWarningDialog } from './DuplicateWarningDialog';
 import { PhotoPreviewDialog } from './PhotoPreviewDialog';
+import { PhotoListView } from './PhotoListView';
 import { cn } from '@/lib/utils';
 
 interface CameraViewProps {
@@ -40,6 +41,9 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
   const [todayCount, setTodayCount] = useState(0);
   const [isCapturing, setIsCapturing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  
+  // Photo list view
+  const [showPhotoList, setShowPhotoList] = useState(false);
   
   // Preview mode
   const [previewEnabled, setPreviewEnabled] = useState(false);
@@ -204,6 +208,24 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
     tagInputRef.current?.focus();
   };
 
+  // Handle retake from photo list
+  const handleRetakeFromList = (prefix: string, retakeTagNumber: string) => {
+    setShowPhotoList(false);
+    setSelectedPrefix(prefix);
+    setTagNumber(retakeTagNumber);
+    setTimeout(() => tagInputRef.current?.focus(), 100);
+  };
+
+  // Show photo list view
+  if (showPhotoList) {
+    return (
+      <PhotoListView
+        onBack={() => setShowPhotoList(false)}
+        onRetake={handleRetakeFromList}
+      />
+    );
+  }
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6 text-center">
@@ -227,6 +249,15 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
           <span className="font-medium">Today: {todayCount} photos</span>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowPhotoList(true)}
+            className="flex items-center gap-1"
+          >
+            <List className="h-4 w-4" />
+            <span>All Photos</span>
+          </Button>
           <div className="flex items-center gap-2">
             <Eye className="h-4 w-4 text-muted-foreground" />
             <Label htmlFor="preview-mode" className="text-sm">Preview</Label>
