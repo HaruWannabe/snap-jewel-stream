@@ -1,10 +1,17 @@
-import { useState, useEffect } from 'react';
-import { X, Share, PlusSquare } from 'lucide-react';
+ import { useState, useEffect, useCallback } from 'react';
+ import { X, Share, PlusSquare, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+ interface BeforeInstallPromptEvent extends Event {
+   prompt: () => Promise<void>;
+   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+ }
+ 
 export function InstallPrompt() {
   const [showPrompt, setShowPrompt] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+   const [isAndroid, setIsAndroid] = useState(false);
+   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     // Check if already installed or dismissed
@@ -20,13 +27,28 @@ export function InstallPrompt() {
     const userAgent = window.navigator.userAgent.toLowerCase();
     const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
     const isSafari = /safari/.test(userAgent) && !/chrome/.test(userAgent);
+     const isAndroidDevice = /android/.test(userAgent);
     
     setIsIOS(isIOSDevice);
+     setIsAndroid(isAndroidDevice);
     
-    // Show prompt after a short delay
+     // iOS Safari: show manual instructions
     if (isIOSDevice && isSafari) {
       setTimeout(() => setShowPrompt(true), 2000);
     }
+ 
+     // Android/Desktop: listen for beforeinstallprompt
+     const handleBeforeInstall = (e: Event) => {
+       e.preventDefault();
+       setDeferredPrompt(e as BeforeInstallPromptEvent);
+       setTimeout(() => setShowPrompt(true), 2000);
+     };
+ 
+     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+ 
+     return () => {
+       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+     };
   }, []);
 
   const handleDismiss = () => {
@@ -34,6 +56,19 @@ export function InstallPrompt() {
     localStorage.setItem('install-prompt-dismissed', 'true');
   };
 
+   const handleInstallClick = useCallback(async () => {
+     if (!deferredPrompt) return;
+     
+     await deferredPrompt.prompt();
+     const { outcome } = await deferredPrompt.userChoice;
+     
+     if (outcome === 'accepted') {
+       setShowPrompt(false);
+       localStorage.setItem('install-prompt-dismissed', 'true');
+     }
+     setDeferredPrompt(null);
+   }, [deferredPrompt]);
+ 
   if (!showPrompt) return null;
 
   return (
@@ -62,10 +97,26 @@ export function InstallPrompt() {
               <span>Select <strong>Add to Home Screen</strong></span>
             </div>
           </div>
+         ) : deferredPrompt ? (
+           <div className="space-y-3">
+             <p className="text-sm text-muted-foreground">
+               Install this app on your {isAndroid ? 'Android device' : 'device'} for the best experience:
+             </p>
+             <Button onClick={handleInstallClick} className="w-full gap-2">
+               <Download className="h-4 w-4" />
+               Install App
+             </Button>
+           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            For the best experience, install this app using your browser's "Add to Home Screen" option.
-          </p>
+           <div className="space-y-3 text-sm text-muted-foreground">
+             <p>Install this app on your {isAndroid ? 'Android' : 'device'} for the best experience:</p>
+             <div className="flex items-center gap-2">
+               <span className="flex items-center justify-center w-8 h-8 bg-muted rounded-lg">
+                 <Download className="h-4 w-4" />
+               </span>
+               <span>Tap the browser menu (⋮) and select <strong>Install app</strong> or <strong>Add to Home Screen</strong></span>
+             </div>
+           </div>
         )}
       </div>
     </div>
