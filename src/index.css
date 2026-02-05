@@ -113,10 +113,16 @@ All colors MUST be HSL.
 }
 
 /* Prevent text selection on interactive elements */
-button, input, select {
+ button {
   -webkit-user-select: none;
   user-select: none;
 }
+ 
+ /* Allow text selection in inputs for proper typing */
+ input, textarea {
+   -webkit-user-select: text;
+   user-select: text;
+ }
 
 /* Smooth tap highlight removal */
 * {
