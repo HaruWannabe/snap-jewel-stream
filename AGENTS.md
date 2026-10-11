@@ -1,0 +1,1 @@
+- Keep photo capture records and image blobs in the existing IndexedDB stores; connected-mode metadata and retry work must be additive, with versioned store upgrades that preserve already-saved photos.
