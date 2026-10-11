@@ -237,6 +237,11 @@ export async function checkFilenameExists(prefix: string, tagNumber: string): Pr
   return !!existing;
 }
 
+export async function checkExactFilenameExists(filename: string): Promise<boolean> {
+  const database = await getDB();
+  return Boolean(await database.getFromIndex('photos', 'by-filename', filename));
+}
+
 export async function getTodayCount(): Promise<number> {
   const database = await getDB();
   const today = new Date().toISOString().split('T')[0];
