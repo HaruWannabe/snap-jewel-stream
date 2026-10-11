@@ -7,6 +7,28 @@ interface PhotoMetadata {
   tagNumber: string;
   timestamp: number;
   date: string; // YYYY-MM-DD for daily counting
+  connectedSublotId?: string;
+  connectedSequence?: number;
+}
+
+export interface TaggingLineConnection {
+  baseUrl: string;
+  deviceKey: string;
+}
+
+export interface PhotoUploadJob {
+  id: string;
+  sublotId: string;
+  sequence: number;
+  photoId: string;
+  filename: string;
+  baseUrl: string;
+  overwrite: boolean;
+  status: 'queued' | 'uploaded';
+  attempts: number;
+  nextAttemptAt: number;
+  createdAt: number;
+  lastError?: string;
 }
 
 interface JewelryDBSchema extends DBSchema {
@@ -26,6 +48,14 @@ interface JewelryDBSchema extends DBSchema {
     key: string;
     value: unknown;
   };
+  uploadQueue: {
+    key: string;
+    value: PhotoUploadJob;
+    indexes: {
+      'by-sublot': string;
+      'by-status': string;
+    };
+  };
 }
 
 let db: IDBPDatabase<JewelryDBSchema> | null = null;
@@ -33,18 +63,25 @@ let db: IDBPDatabase<JewelryDBSchema> | null = null;
 export async function getDB(): Promise<IDBPDatabase<JewelryDBSchema>> {
   if (db) return db;
   
-  db = await openDB<JewelryDBSchema>('jewelry-photos', 1, {
+  db = await openDB<JewelryDBSchema>('jewelry-photos', 2, {
     upgrade(database) {
-      // Photos metadata store
-      const photoStore = database.createObjectStore('photos', { keyPath: 'id' });
-      photoStore.createIndex('by-filename', 'filename', { unique: true });
-      photoStore.createIndex('by-date', 'date', { unique: false });
-      
-      // Blobs store for actual images
-      database.createObjectStore('blobs', { keyPath: undefined });
-      
-      // Settings store
-      database.createObjectStore('settings', { keyPath: undefined });
+      // Existing v1 stores and records are intentionally left untouched.
+      if (!database.objectStoreNames.contains('photos')) {
+        const photoStore = database.createObjectStore('photos', { keyPath: 'id' });
+        photoStore.createIndex('by-filename', 'filename', { unique: true });
+        photoStore.createIndex('by-date', 'date', { unique: false });
+      }
+      if (!database.objectStoreNames.contains('blobs')) {
+        database.createObjectStore('blobs', { keyPath: undefined });
+      }
+      if (!database.objectStoreNames.contains('settings')) {
+        database.createObjectStore('settings', { keyPath: undefined });
+      }
+      if (!database.objectStoreNames.contains('uploadQueue')) {
+        const uploadStore = database.createObjectStore('uploadQueue', { keyPath: 'id' });
+        uploadStore.createIndex('by-sublot', 'sublotId', { unique: false });
+        uploadStore.createIndex('by-status', 'status', { unique: false });
+      }
     },
   });
   
@@ -90,11 +127,119 @@ export async function savePhoto(
   return { success: true, filename };
 }
 
+/** Saves with the exact server-supplied filename and atomically queues its upload. */
+export async function saveConnectedPhoto(
+  blob: Blob,
+  filename: string,
+  options: { sublotId: string; sequence: number; baseUrl: string; overwrite: boolean }
+): Promise<{ success: boolean; exists?: boolean; photoId?: string }> {
+  const database = await getDB();
+  const existing = await database.getFromIndex('photos', 'by-filename', filename);
+  if (existing && !options.overwrite) return { success: false, exists: true };
+
+  const photoId = existing?.id || crypto.randomUUID();
+  const now = new Date();
+  const metadata: PhotoMetadata = {
+    id: photoId,
+    filename,
+    prefix: existing?.prefix || '',
+    tagNumber: existing?.tagNumber || '',
+    timestamp: now.getTime(),
+    date: now.toISOString().slice(0, 10),
+    connectedSublotId: options.sublotId,
+    connectedSequence: options.sequence,
+  };
+  const job: PhotoUploadJob = {
+    id: `${options.sublotId}:${options.sequence}`,
+    sublotId: options.sublotId,
+    sequence: options.sequence,
+    photoId,
+    filename,
+    baseUrl: options.baseUrl,
+    overwrite: options.overwrite,
+    status: 'queued',
+    attempts: 0,
+    nextAttemptAt: now.getTime(),
+    createdAt: now.getTime(),
+  };
+
+  const tx = database.transaction(['photos', 'blobs', 'uploadQueue'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('photos').put(metadata),
+    tx.objectStore('blobs').put(blob, photoId),
+    tx.objectStore('uploadQueue').put(job),
+    tx.done,
+  ]);
+  return { success: true, photoId };
+}
+
+export async function getTaggingLineConnection(): Promise<TaggingLineConnection> {
+  const database = await getDB();
+  const value = await database.get('settings', 'taggingLineConnection');
+  if (!value || typeof value !== 'object') return { baseUrl: '', deviceKey: '' };
+  const connection = value as Partial<TaggingLineConnection>;
+  return {
+    baseUrl: typeof connection.baseUrl === 'string' ? connection.baseUrl : '',
+    deviceKey: typeof connection.deviceKey === 'string' ? connection.deviceKey : '',
+  };
+}
+
+export async function saveTaggingLineConnection(connection: TaggingLineConnection): Promise<void> {
+  const database = await getDB();
+  await database.put('settings', connection, 'taggingLineConnection');
+  window.dispatchEvent(new Event('taggingline:settings'));
+}
+
+export async function getUploadJobs(sublotId?: string): Promise<PhotoUploadJob[]> {
+  const database = await getDB();
+  if (sublotId) return database.getAllFromIndex('uploadQueue', 'by-sublot', sublotId);
+  return database.getAll('uploadQueue');
+}
+
+export async function getDueUploadJobs(now = Date.now()): Promise<PhotoUploadJob[]> {
+  const jobs = await getDB().then((database) => database.getAllFromIndex('uploadQueue', 'by-status', 'queued'));
+  return jobs.filter((job) => job.nextAttemptAt <= now).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export async function markUploadSucceeded(jobId: string): Promise<void> {
+  const database = await getDB();
+  const job = await database.get('uploadQueue', jobId);
+  if (!job) return;
+  await database.put('uploadQueue', { ...job, status: 'uploaded', lastError: undefined });
+  window.dispatchEvent(new Event('taggingline:uploads'));
+}
+
+export async function scheduleUploadRetry(jobId: string, error: string): Promise<void> {
+  const database = await getDB();
+  const job = await database.get('uploadQueue', jobId);
+  if (!job) return;
+  const attempts = job.attempts + 1;
+  const delay = Math.min(1000 * (2 ** Math.min(attempts - 1, 8)), 5 * 60 * 1000);
+  await database.put('uploadQueue', {
+    ...job,
+    status: 'queued',
+    attempts,
+    nextAttemptAt: Date.now() + delay,
+    lastError: error.slice(0, 300),
+  });
+  window.dispatchEvent(new Event('taggingline:uploads'));
+}
+
+export async function getSublotPhotos(sublotId: string): Promise<PhotoMetadata[]> {
+  const all = await getAllPhotos();
+  return all.filter((photo) => photo.connectedSublotId === sublotId);
+}
+
 export async function checkFilenameExists(prefix: string, tagNumber: string): Promise<boolean> {
   const database = await getDB();
   const filename = `${prefix}${tagNumber}.jpg`;
   const existing = await database.getFromIndex('photos', 'by-filename', filename);
   return !!existing;
+}
+
+export async function checkExactFilenameExists(filename: string): Promise<boolean> {
+  const database = await getDB();
+  return Boolean(await database.getFromIndex('photos', 'by-filename', filename));
 }
 
 export async function getTodayCount(): Promise<number> {
