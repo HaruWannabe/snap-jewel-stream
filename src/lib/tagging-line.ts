@@ -88,8 +88,10 @@ async function apiRequest<T>(
 }
 
 export async function getTaggingLineQueue(connection: TaggingLineConnection): Promise<TaggingLineQueueEntry[]> {
-  const payload = await apiRequest<{ sublots: TaggingLineQueueEntry[] }>(connection, '/api/public/photo/queue');
-  return Array.isArray(payload.sublots) ? payload.sublots : [];
+  const payload = await apiRequest<{ sublots?: TaggingLineQueueEntry[]; queue?: TaggingLineQueueEntry[] } | TaggingLineQueueEntry[]>(connection, '/api/public/photo/queue');
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.sublots)) return payload.sublots;
+  return Array.isArray(payload.queue) ? payload.queue : [];
 }
 
 export async function testTaggingLineConnection(connection: TaggingLineConnection): Promise<number> {
@@ -101,10 +103,11 @@ export async function getTaggingLineSublot(
   connection: TaggingLineConnection,
   sublotId: string
 ): Promise<TaggingLineSublot> {
-  return apiRequest<TaggingLineSublot>(
+  const payload = await apiRequest<TaggingLineSublot | { sublot: TaggingLineSublot }>(
     connection,
     `/api/public/photo/sublots/${encodeURIComponent(sublotId)}`
   );
+  return 'sublot' in payload ? payload.sublot : payload;
 }
 
 export async function uploadSublotPhoto(
