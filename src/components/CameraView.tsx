@@ -91,6 +91,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
   }, [isReady]);
 
   const filename = selectedPrefix && tagNumber ? `${selectedPrefix}${tagNumber}.jpg` : '';
+  const displayFilename = connected?.item.filename ?? filename;
   const canCapture = isReady && (connected ? Boolean(connected.item.filename) : Boolean(selectedPrefix && tagNumber.trim())) && !isCapturing;
 
   const handleVideoTap = (e: React.MouseEvent<HTMLVideoElement>) => {
@@ -277,16 +278,15 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
           ) : onOpenConnected ? (
             <Button variant="outline" size="icon" onClick={onOpenConnected} aria-label="Work queue" title="Work queue"><Layers className="h-4 w-4" /></Button>
           ) : null}
-          {!connected && <>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowPhotoList(true)}
-            className="flex items-center gap-1"
-          >
-            <List className="h-4 w-4" />
-            <span className="hidden sm:inline">All Photos</span>
-          </Button>
+          {!connected && <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPhotoList(true)}
+              className="flex items-center gap-1"
+            >
+              <List className="h-4 w-4" />
+              <span className="hidden sm:inline">All Photos</span>
+            </Button>}
           <div className="flex items-center gap-2">
             <Eye className="h-4 w-4 text-muted-foreground" />
             <Label htmlFor="preview-mode" className="text-sm">Preview</Label>
@@ -296,7 +296,6 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
               onCheckedChange={setPreviewEnabled}
             />
           </div>
-          </>}
           <Button variant="ghost" size="icon" onClick={onOpenSettings}>
             <Settings className="h-5 w-5" />
           </Button>
@@ -430,7 +429,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       
       <DuplicateWarningDialog
         open={duplicateDialogOpen}
-        filename={filename}
+        filename={displayFilename}
         onConfirm={handleDuplicateConfirm}
         onCancel={handleDuplicateCancel}
       />
