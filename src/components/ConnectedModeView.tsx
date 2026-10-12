@@ -104,7 +104,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       setPhotos(local);
       setJobs(localJobs);
       setSelectedSequence(getNextPending(merged));
-      setCameraOpen(false);
+      setCameraOpen(getNextPending(merged) !== null);
     } catch (error) {
       toast({ title: 'Could not open sublot', description: error instanceof Error ? error.message : 'Check the server connection.', variant: 'destructive' });
     } finally {
@@ -190,9 +190,13 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
         onOpenSettings={onOpenSettings}
         connected={{ connection, sublot, item: selectedItem, uploadCounts: { uploaded, queued } }}
         onConnectedSaved={async () => {
-          const nextPhotos = await getSublotPhotos(sublot.sublot_id);
+          const [nextPhotos, nextJobs] = await Promise.all([
+            getSublotPhotos(sublot.sublot_id),
+            getUploadJobs(sublot.sublot_id),
+          ]);
           const updated = overlayLocalPhotos(sublot, nextPhotos);
           setPhotos(nextPhotos);
+          setJobs(nextJobs);
           setSublot(updated);
           const next = getNextPending(updated);
           setSelectedSequence(next);
