@@ -151,7 +151,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     try {
       await skipSublotItem(connection, sublot.sublot_id, sequence, reason.trim().slice(0, 160));
       const updated = await getTaggingLineSublot(connection, sublot.sublot_id);
-      setServerDoneCount(updated.done_count);
       setSublot(updated);
       setSelectedSequence(getNextPending(updated));
     } catch (error) {
