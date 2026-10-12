@@ -185,7 +185,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           const updated = overlayLocalPhotos(sublot, nextPhotos);
           setPhotos(nextPhotos);
           setSublot(updated);
-          setServerDoneCount((current) => Math.max(current, updated.done_count - nextPhotos.filter((photo) => photo.connectedSequence !== undefined).length));
           const next = getNextPending(updated);
           setSelectedSequence(next);
           if (next === null) setCameraOpen(false);
@@ -227,16 +226,18 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
                     const selected = selectedSequence === item.sequence;
                     const holdSkip = () => { void handleSkip(item.sequence); };
                     let longPressTimer: ReturnType<typeof setTimeout> | undefined;
+                    let longPressTriggered = false;
                     return (
                       <Button
                         key={item.sequence}
                         variant="outline"
                         className={`relative aspect-square h-auto min-w-0 flex-col gap-0.5 rounded-md border px-1 py-1 ${item.status === 'done' ? 'border-primary bg-primary/15' : item.status === 'skipped' ? 'border-muted-foreground bg-muted text-muted-foreground' : 'border-border bg-background'} ${selected ? 'ring-2 ring-primary ring-offset-1' : ''}`}
                         onClick={() => {
+                          if (longPressTriggered) return;
                           if (item.status === 'skipped') return;
                           setSelectedSequence(item.sequence);
                         }}
-                        onPointerDown={() => { longPressTimer = setTimeout(holdSkip, 650); }}
+                        onPointerDown={() => { longPressTriggered = false; longPressTimer = setTimeout(() => { longPressTriggered = true; holdSkip(); }, 650); }}
                         onPointerUp={() => { if (longPressTimer) clearTimeout(longPressTimer); }}
                         onPointerLeave={() => { if (longPressTimer) clearTimeout(longPressTimer); }}
                         aria-label={`Tray ${tray.tray_code}, compartment ${compartment}, ${item.status}, ${item.pcs} pcs. Hold to skip pending compartment.`}
