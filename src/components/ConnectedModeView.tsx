@@ -44,6 +44,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   const [connection, setConnection] = useState<TaggingLineConnection>({ baseUrl: '', deviceKey: '' });
   const [queue, setQueue] = useState<TaggingLineQueueEntry[]>([]);
   const [sublot, setSublot] = useState<TaggingLineSublot | null>(null);
+  const [serverDoneCount, setServerDoneCount] = useState(0);
   const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [photos, setPhotos] = useState<PhotoMetadata[]>([]);
@@ -93,6 +94,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       ]);
       const merged = overlayLocalPhotos(remote, local);
       setSublot(merged);
+      setServerDoneCount(remote.done_count);
       setPhotos(local);
       setJobs(localJobs);
       setSelectedSequence(getNextPending(merged));
@@ -109,6 +111,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     const onUploadChange = () => {
       void refreshSublotLocal(sublot.sublot_id);
       void getTaggingLineSublot(connection, sublot.sublot_id).then((remote) => {
+        setServerDoneCount(remote.done_count);
         setPhotos((currentPhotos) => {
           setSublot(overlayLocalPhotos(remote, currentPhotos));
           return currentPhotos;
@@ -121,7 +124,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
   const uploadJobs = useMemo(() => jobs, [jobs]);
   const queued = uploadJobs.filter((job) => job.status === 'queued').length;
-  const uploaded = uploadJobs.filter((job) => job.status === 'uploaded').length;
+  const uploaded = serverDoneCount;
   const selectedItem = sublot?.items.find((item) => item.sequence === selectedSequence) ?? null;
   const pendingItem = sublot ? getNextPending(sublot) : null;
   const canFinishAnyway = Boolean(sublot && sublot.items.some((item) => item.status === 'skipped') && sublot.items.every((item) => item.status !== 'pending'));
@@ -134,6 +137,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     try {
       await skipSublotItem(connection, sublot.sublot_id, sequence, reason.trim().slice(0, 160));
       const updated = await getTaggingLineSublot(connection, sublot.sublot_id);
+      setServerDoneCount(updated.done_count);
       setSublot(updated);
       setSelectedSequence(getNextPending(updated));
     } catch (error) {
@@ -181,6 +185,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           const updated = overlayLocalPhotos(sublot, nextPhotos);
           setPhotos(nextPhotos);
           setSublot(updated);
+          setServerDoneCount((current) => Math.max(current, updated.done_count - nextPhotos.filter((photo) => photo.connectedSequence !== undefined).length));
           const next = getNextPending(updated);
           setSelectedSequence(next);
           if (next === null) setCameraOpen(false);
