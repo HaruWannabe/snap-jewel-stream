@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Camera, Download, RefreshCw, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -52,6 +52,8 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const skipTimers = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; triggered: boolean }>());
 
   useEffect(() => {
     const online = () => setIsOnline(true);
@@ -61,20 +63,26 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     return () => {
       window.removeEventListener('online', online);
       window.removeEventListener('offline', offline);
+      skipTimers.current.forEach(({ timer }) => clearTimeout(timer));
+      skipTimers.current.clear();
     };
   }, []);
 
   const refreshQueue = useCallback(async (showSpinner = false) => {
     if (!connection.baseUrl || !connection.deviceKey) {
       setQueue([]);
+      setQueueError(null);
       setLoading(false);
       return;
     }
     if (showSpinner) setRefreshing(true);
     try {
       setQueue(await getTaggingLineQueue(connection));
+      setQueueError(null);
     } catch (error) {
-      toast({ title: 'Could not load work queue', description: error instanceof Error ? error.message : 'Check the server connection.', variant: 'destructive' });
+      const message = error instanceof Error ? error.message : 'Check the server connection.';
+      setQueueError(message);
+      toast({ title: 'Could not load work queue', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -238,21 +246,41 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
                     if (!item) return <div key={compartment} className="aspect-square rounded border border-dashed border-border" aria-hidden="true" />;
                     const selected = selectedSequence === item.sequence;
                     const holdSkip = () => { void handleSkip(item.sequence); };
-                    let longPressTimer: ReturnType<typeof setTimeout> | undefined;
-                    let longPressTriggered = false;
                     return (
                       <Button
                         key={item.sequence}
                         variant="outline"
                         className={`relative aspect-square h-auto min-w-0 flex-col gap-0.5 rounded-md border px-1 py-1 ${item.status === 'done' ? 'border-primary bg-primary/15' : item.status === 'skipped' ? 'border-muted-foreground bg-muted text-muted-foreground' : 'border-border bg-background'} ${selected ? 'ring-2 ring-primary ring-offset-1' : ''}`}
                         onClick={() => {
-                          if (longPressTriggered) return;
+                          const longPress = skipTimers.current.get(item.sequence);
+                          if (longPress?.triggered) {
+                            skipTimers.current.delete(item.sequence);
+                            return;
+                          }
                           if (item.status === 'skipped') return;
                           setSelectedSequence(item.sequence);
                         }}
-                        onPointerDown={() => { longPressTriggered = false; longPressTimer = setTimeout(() => { longPressTriggered = true; holdSkip(); }, 650); }}
-                        onPointerUp={() => { if (longPressTimer) clearTimeout(longPressTimer); }}
-                        onPointerLeave={() => { if (longPressTimer) clearTimeout(longPressTimer); }}
+                        onPointerDown={() => {
+                          const press = { triggered: false, timer: setTimeout(() => {
+                            press.triggered = true;
+                            holdSkip();
+                          }, 650) };
+                          skipTimers.current.set(item.sequence, press);
+                        }}
+                        onPointerUp={() => {
+                          const press = skipTimers.current.get(item.sequence);
+                          if (press && !press.triggered) {
+                            clearTimeout(press.timer);
+                            skipTimers.current.delete(item.sequence);
+                          }
+                        }}
+                        onPointerLeave={() => {
+                          const press = skipTimers.current.get(item.sequence);
+                          if (press && !press.triggered) {
+                            clearTimeout(press.timer);
+                            skipTimers.current.delete(item.sequence);
+                          }
+                        }}
                         aria-label={`Tray ${tray.tray_code}, compartment ${compartment}, ${item.status}, ${item.pcs} pcs. Hold to skip pending compartment.`}
                       >
                         <span className="text-xs font-semibold">{compartment}</span>
@@ -291,7 +319,8 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       <main className="space-y-3 p-3">
         {!connection.deviceKey || !connection.baseUrl ? <Card><CardContent className="space-y-3 p-4"><p className="text-sm text-muted-foreground">Set the server address and device key to load connected work. Manual photo capture remains available without them.</p><Button onClick={onOpenSettings}>Open connection settings</Button></CardContent></Card> : null}
         {loading ? <p className="py-8 text-center text-sm text-muted-foreground">Loading work queue…</p> : null}
-        {!loading && connection.baseUrl && connection.deviceKey && queue.length === 0 ? <div className="py-10 text-center text-muted-foreground">No sublots in the queue.</div> : null}
+        {!loading && queueError && <Card><CardContent className="space-y-3 p-4"><p className="text-sm text-destructive">{queueError}</p><Button variant="outline" onClick={onBack}>Return to manual camera</Button></CardContent></Card>}
+        {!loading && !queueError && connection.baseUrl && connection.deviceKey && queue.length === 0 ? <div className="py-10 text-center text-muted-foreground">No sublots in the queue.</div> : null}
         {queue.map((entry) => <Card key={entry.sublot_id} className="cursor-pointer" onClick={() => void openSublot(entry.sublot_id)}><CardContent className="flex items-center justify-between gap-3 p-4"><div className="min-w-0"><p className="font-semibold">{entry.lot_no} · Sublot {entry.sublot_no}</p><p className="truncate text-sm text-muted-foreground">{entry.product_name}</p><p className="mt-1 text-xs text-muted-foreground">{entry.compcode} · {entry.ic}</p></div><div className="shrink-0 text-right"><p className="font-mono text-sm">{entry.done_count} / {entry.total_items}</p><p className="text-xs text-muted-foreground">done</p></div></CardContent></Card>)}
         {connection.baseUrl && connection.deviceKey && !isOnline && <p className="flex items-center gap-2 text-xs text-muted-foreground"><WifiOff className="h-4 w-4" />Offline — saved photos will upload when connected.</p>}
       </main>
