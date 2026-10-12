@@ -63,6 +63,9 @@ export function normalizeTaggingLineBaseUrl(value: string): string {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Server URL must begin with http:// or https://');
   }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('Server address cannot include login details, a query, or a fragment.');
+  }
   return parsed.toString().replace(/\/$/, '');
 }
 
@@ -90,6 +93,7 @@ async function apiRequest<T>(
 export async function getTaggingLineQueue(connection: TaggingLineConnection): Promise<TaggingLineQueueEntry[]> {
   const payload = await apiRequest<{ sublots?: TaggingLineQueueEntry[]; queue?: TaggingLineQueueEntry[]; data?: TaggingLineQueueEntry[] } | TaggingLineQueueEntry[]>(connection, '/api/public/photo/queue');
   if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
   if (Array.isArray(payload.sublots)) return payload.sublots;
   if (Array.isArray(payload.queue)) return payload.queue;
   return Array.isArray(payload.data) ? payload.data : [];
@@ -108,6 +112,7 @@ export async function getTaggingLineSublot(
     connection,
     `/api/public/photo/sublots/${encodeURIComponent(sublotId)}`
   );
+  if (!payload || typeof payload !== 'object') throw new Error('The server returned an invalid sublot response.');
   if ('sublot' in payload) return payload.sublot;
   if ('data' in payload) return payload.data;
   return payload;
@@ -123,9 +128,10 @@ export async function uploadSublotPhoto(
 ): Promise<{ ok: boolean; sequence: number; filename: string; done_count: number; skipped_count: number; total: number }> {
   const form = new FormData();
   form.append('file', blob, filename);
+  const query = overwrite ? '?overwrite=true' : '';
   return apiRequest(
     connection,
-    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo`,
+    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo${query}`,
     { method: 'POST', body: form }
   );
 }
