@@ -33,7 +33,7 @@ describe('Tagging Line client', () => {
     const blob = new Blob(['photo'], { type: 'image/jpeg' });
     await uploadSublotPhoto({ baseUrl: 'https://line.example', deviceKey: 'key' }, 'lot/a', 9, 'AWMS0009.final.jpg', blob, true);
     const [url, options] = uploadMock.mock.calls[0] ?? [];
-    expect(url).toBe('https://line.example/api/public/photo/sublots/lot%2Fa/items/9/photo?overwrite=true');
+    expect(url).toBe('https://line.example/api/public/photo/sublots/lot%2Fa/items/9/photo');
     expect(options?.body).toBeInstanceOf(FormData);
     const file = (options?.body as FormData).get('file');
     expect(file).toBeInstanceOf(File);
