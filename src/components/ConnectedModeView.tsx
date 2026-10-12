@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Camera, Check, Download, RefreshCw, WifiOff } from 'lucide-react';
+import { ArrowLeft, Camera, Download, RefreshCw, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
@@ -37,6 +37,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   const [queue, setQueue] = useState<TaggingLineQueueEntry[]>([]);
   const [sublot, setSublot] = useState<TaggingLineSublot | null>(null);
   const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [photos, setPhotos] = useState<PhotoMetadata[]>([]);
   const [jobs, setJobs] = useState<PhotoUploadJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +87,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       setPhotos(local);
       setJobs(localJobs);
       setSelectedSequence(getNextPending(remote));
+      setCameraOpen(false);
     } catch (error) {
       toast({ title: 'Could not open sublot', description: error instanceof Error ? error.message : 'Check the server connection.', variant: 'destructive' });
     } finally {
@@ -155,7 +157,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     }
   };
 
-  if (selectedItem && sublot) {
+  if (selectedItem && sublot && cameraOpen) {
     return (
       <CameraView
         onOpenSettings={onOpenSettings}
@@ -172,7 +174,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
             setSelectedSequence(remaining?.sequence ?? null);
           }
         }}
-        onExitConnected={() => setSelectedSequence(null)}
+        onExitConnected={() => setCameraOpen(false)}
       />
     );
   }
@@ -237,7 +239,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           {selectedItem && <div className="sticky bottom-2 space-y-2 border-t border-border bg-background/95 p-3 backdrop-blur">
             <p className="text-center text-sm">Tray {selectedItem.tray_code} · Compartment {selectedItem.compartment_no}</p>
             <p className="truncate text-center font-mono text-xs text-muted-foreground">{selectedItem.filename}</p>
-            <Button className="w-full" onClick={() => setSelectedSequence(selectedItem.sequence)}><Camera className="mr-2 h-4 w-4" />{selectedItem.status === 'done' ? 'Reshoot compartment' : 'Photograph compartment'}</Button>
+            <Button className="w-full" onClick={() => { setSelectedSequence(selectedItem.sequence); setCameraOpen(true); }}><Camera className="mr-2 h-4 w-4" />{selectedItem.status === 'done' ? 'Reshoot compartment' : 'Photograph compartment'}</Button>
           </div>}
           {pendingItem === null && <div className="space-y-2 border-t border-border pt-4">
             {pendingJobs > 0 && <p className="text-sm text-muted-foreground">{pendingJobs} photo upload{pendingJobs === 1 ? '' : 's'} remain queued.</p>}

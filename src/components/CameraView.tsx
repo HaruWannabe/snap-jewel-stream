@@ -174,7 +174,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
         sublotId: connected.sublot.sublot_id,
         sequence: connected.item.sequence,
         baseUrl: connected.connection.baseUrl,
-        overwrite,
+        overwrite: overwrite || connected.item.status === 'done',
       })
       : await savePhoto(blob, selectedPrefix, tagNumber, overwrite);
     
@@ -266,8 +266,8 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       <canvas ref={canvasRef} className="hidden" />
       
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-card border-b border-border">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-card border-b border-border">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           <Camera className="h-5 w-5 text-primary" />
           <span className="font-medium">Today: {todayCount} photos</span>
         </div>
@@ -275,7 +275,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
           {connected ? (
             <Button variant="ghost" size="icon" aria-label="Back to tray grid" onClick={onExitConnected}><ArrowLeft className="h-5 w-5" /></Button>
           ) : onOpenConnected ? (
-            <Button variant="outline" size="sm" onClick={onOpenConnected} className="flex items-center gap-1"><Layers className="h-4 w-4" /><span>Work queue</span></Button>
+            <Button variant="outline" size="icon" onClick={onOpenConnected} aria-label="Work queue" title="Work queue"><Layers className="h-4 w-4" /></Button>
           ) : null}
           {!connected && <>
           <Button
@@ -285,7 +285,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
             className="flex items-center gap-1"
           >
             <List className="h-4 w-4" />
-            <span>All Photos</span>
+            <span className="hidden sm:inline">All Photos</span>
           </Button>
           <div className="flex items-center gap-2">
             <Eye className="h-4 w-4 text-muted-foreground" />
