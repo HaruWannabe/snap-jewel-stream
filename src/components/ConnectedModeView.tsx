@@ -168,7 +168,8 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       return;
     }
     try {
-      const result = await exportPhotoBatch(photosForExport);
+      const safeName = `${sublot?.lot_no ?? 'sublot'}-${sublot?.sublot_no ?? ''}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+      const result = await exportPhotoBatch(photosForExport, { filename: `tagging-line-${safeName}.zip` });
       toast({ title: 'Sublot ZIP ready', description: `${result.count} saved photos were included.` });
     } catch (error) {
       toast({ title: 'ZIP export failed', description: error instanceof Error ? error.message : 'Try again.', variant: 'destructive' });

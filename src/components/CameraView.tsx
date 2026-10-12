@@ -437,7 +437,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       <PhotoPreviewDialog
         open={previewDialogOpen}
         imageBlob={pendingBlob}
-        filename={filename}
+        filename={displayFilename}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
       />

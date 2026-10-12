@@ -88,10 +88,11 @@ async function apiRequest<T>(
 }
 
 export async function getTaggingLineQueue(connection: TaggingLineConnection): Promise<TaggingLineQueueEntry[]> {
-  const payload = await apiRequest<{ sublots?: TaggingLineQueueEntry[]; queue?: TaggingLineQueueEntry[] } | TaggingLineQueueEntry[]>(connection, '/api/public/photo/queue');
+  const payload = await apiRequest<{ sublots?: TaggingLineQueueEntry[]; queue?: TaggingLineQueueEntry[]; data?: TaggingLineQueueEntry[] } | TaggingLineQueueEntry[]>(connection, '/api/public/photo/queue');
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload.sublots)) return payload.sublots;
-  return Array.isArray(payload.queue) ? payload.queue : [];
+  if (Array.isArray(payload.queue)) return payload.queue;
+  return Array.isArray(payload.data) ? payload.data : [];
 }
 
 export async function testTaggingLineConnection(connection: TaggingLineConnection): Promise<number> {
@@ -103,11 +104,13 @@ export async function getTaggingLineSublot(
   connection: TaggingLineConnection,
   sublotId: string
 ): Promise<TaggingLineSublot> {
-  const payload = await apiRequest<TaggingLineSublot | { sublot: TaggingLineSublot }>(
+  const payload = await apiRequest<TaggingLineSublot | { sublot: TaggingLineSublot; data?: TaggingLineSublot } | { data: TaggingLineSublot }>(
     connection,
     `/api/public/photo/sublots/${encodeURIComponent(sublotId)}`
   );
-  return 'sublot' in payload ? payload.sublot : payload;
+  if ('sublot' in payload) return payload.sublot;
+  if ('data' in payload) return payload.data;
+  return payload;
 }
 
 export async function uploadSublotPhoto(
@@ -120,10 +123,9 @@ export async function uploadSublotPhoto(
 ): Promise<{ ok: boolean; sequence: number; filename: string; done_count: number; skipped_count: number; total: number }> {
   const form = new FormData();
   form.append('file', blob, filename);
-  const query = overwrite ? '?overwrite=true' : '';
   return apiRequest(
     connection,
-    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo${query}`,
+    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo`,
     { method: 'POST', body: form }
   );
 }
