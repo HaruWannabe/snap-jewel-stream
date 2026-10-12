@@ -7,6 +7,8 @@ import {
   getTaggingLineConnection,
   getUploadJobs,
   getSublotPhotos,
+  retryUploadJob,
+  discardUploadJob,
   type PhotoMetadata,
   type PhotoUploadJob,
   type TaggingLineConnection,
@@ -14,7 +16,7 @@ import {
 import { exportPhotoBatch } from '@/lib/export';
 import {
   completeTaggingLineSublot,
-  canFinishSublot,
+  getFinishState,
   getTaggingLineQueue,
   getTaggingLineSublot,
   skipSublotItem,
@@ -22,6 +24,13 @@ import {
   type TaggingLineSublot,
 } from '@/lib/tagging-line';
 import { CameraView } from './CameraView';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface ConnectedModeViewProps {
   onBack: () => void;
@@ -136,18 +145,30 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     return () => window.removeEventListener('taggingline:uploads', onUploadChange);
   }, [connection, sublot]);
 
+  const [skipSequence, setSkipSequence] = useState<number | null>(null);
+  const [skipReason, setSkipReason] = useState('');
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  const [discardJob, setDiscardJob] = useState<PhotoUploadJob | null>(null);
   const uploadJobs = useMemo(() => jobs, [jobs]);
+  const failedJobs = uploadJobs.filter((job) => job.status === 'failed');
+  const reloadJobs = async () => { if (sublot) setJobs(await getUploadJobs(sublot.sublot_id)); };
   const queued = uploadJobs.filter((job) => job.status === 'queued').length;
   const uploaded = uploadJobs.filter((job) => job.status === 'uploaded').length;
   const selectedItem = sublot?.items.find((item) => item.sequence === selectedSequence) ?? null;
   const pendingItem = sublot ? getNextPending(sublot) : null;
-  const allRemainingSkipped = Boolean(sublot && sublot.items.some((item) => item.status === 'skipped') && sublot.items.every((item) => item.status !== 'pending'));
 
-  const handleSkip = async (sequence: number) => {
+  const handleSkip = (sequence: number) => {
     const item = sublot?.items.find((candidate) => candidate.sequence === sequence);
     if (!sublot || !item || item.status !== 'pending') return;
-    const reason = window.prompt('Reason for skipping this compartment (short reason):');
-    if (!reason?.trim()) return;
+    setSkipReason('');
+    setSkipSequence(sequence);
+  };
+
+  const submitSkip = async () => {
+    const sequence = skipSequence;
+    const reason = skipReason;
+    if (!sublot || sequence === null || !reason.trim()) return;
+    setSkipSequence(null);
     try {
       await skipSublotItem(connection, sublot.sublot_id, sequence, reason.trim().slice(0, 160));
       const updated = await getTaggingLineSublot(connection, sublot.sublot_id);
@@ -158,9 +179,11 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     }
   };
 
-  const handleFinish = async () => {
+  const handleFinish = async (confirmed = false) => {
     if (!sublot) return;
-    if (!canFinishSublot(queued)) {
+    const state = getFinishState(queued, failedJobs.length, sublot.items.filter((i) => i.status === 'skipped').length);
+    if (state.needsConfirm && !confirmed) { setConfirmFinish(true); return; }
+    if (state.disabled) {
       toast({ title: 'Uploads still pending', description: `${queued} photo${queued === 1 ? '' : 's'} still need to upload. Finish after they are sent.` });
       return;
     }
@@ -193,7 +216,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     return (
       <CameraView
         onOpenSettings={onOpenSettings}
-        connected={{ connection, sublot, item: selectedItem, uploadCounts: { uploaded, queued } }}
+        connected={{ connection, sublot, item: selectedItem, uploadCounts: { uploaded, queued, failed: failedJobs.length } }}
         onConnectedSaved={async () => {
           const [nextPhotos, nextJobs] = await Promise.all([
             getSublotPhotos(sublot.sublot_id),
@@ -214,6 +237,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
   if (sublot) {
     const pendingJobs = jobs.filter((job) => job.status === 'queued').length;
+    const finishState = getFinishState(pendingJobs, failedJobs.length, sublot.items.filter((i) => i.status === 'skipped').length);
     return (
       <div className="min-h-screen bg-background text-foreground">
         <header className="flex items-center justify-between border-b border-border bg-card px-3 py-3">
@@ -227,7 +251,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
         <main className="space-y-4 p-3 pb-safe">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 text-sm">
-            <span>{isOnline ? `Uploaded ${uploaded} · ${pendingJobs} pending` : `Offline — ${pendingJobs} queued`}</span>
+            <span>{isOnline ? `Uploaded ${uploaded} · ${pendingJobs} pending · ${failedJobs.length} failed` : `Offline — ${pendingJobs} queued`}</span>
             <Button size="sm" variant="outline" onClick={() => void exportLocalSublot()}><Download className="mr-1 h-4 w-4" />Export sublot ZIP</Button>
           </div>
           {sublot.trays.map((tray) => {
@@ -298,9 +322,66 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           </div>}
           {pendingItem === null && <div className="space-y-2 border-t border-border pt-4">
             {pendingJobs > 0 && <p className="text-sm text-muted-foreground">{pendingJobs} photo upload{pendingJobs === 1 ? '' : 's'} remain queued.</p>}
-            <Button className="w-full" onClick={() => void handleFinish()} disabled={!canFinishSublot(pendingJobs)}>{allRemainingSkipped ? 'Finish anyway (remaining are skipped)' : 'Finish sublot'}</Button>
+            <Button className="w-full" onClick={() => void handleFinish()} disabled={finishState.disabled}>{finishState.label}</Button>
           </div>}
+          {failedJobs.length > 0 && <section className="space-y-2 border-t border-border pt-4">
+            <h2 className="text-sm font-semibold text-destructive">Failed uploads ({failedJobs.length})</h2>
+            {failedJobs.map((job) => {
+              const item = sublot.items.find((i) => i.sequence === job.sequence);
+              return (
+                <div key={job.id} className="space-y-2 rounded-md border border-destructive/40 p-3">
+                  <p className="truncate font-mono text-sm">{job.filename}</p>
+                  <p className="text-xs text-muted-foreground">Tray {item?.tray_code ?? '?'} · Compartment {item?.compartment_no ?? '?'}</p>
+                  {job.lastError && <p className="text-xs text-destructive">{job.lastError}</p>}
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => void retryUploadJob(job.id).then(reloadJobs)}>Retry</Button>
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setDiscardJob(job)}>Discard upload</Button>
+                  </div>
+                </div>
+              );
+            })}
+          </section>}
         </main>
+
+        <Dialog open={skipSequence !== null} onOpenChange={(open) => { if (!open) setSkipSequence(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Skip compartment</DialogTitle>
+              <DialogDescription>Enter a short reason for skipping this compartment.</DialogDescription>
+            </DialogHeader>
+            <Input autoFocus value={skipReason} maxLength={160} placeholder="Reason" onChange={(e) => setSkipReason(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void submitSkip(); }} />
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setSkipSequence(null)}>Cancel</Button>
+              <Button onClick={() => void submitSkip()} disabled={!skipReason.trim()}>Skip</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog open={confirmFinish} onOpenChange={setConfirmFinish}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Finish with photos not uploaded?</AlertDialogTitle>
+              <AlertDialogDescription>{failedJobs.length} photo{failedJobs.length === 1 ? ' was' : 's were'} not uploaded. They stay on this phone; send them using the sublot ZIP.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => { setConfirmFinish(false); void handleFinish(true); }}>Finish anyway</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={!!discardJob} onOpenChange={(open) => { if (!open) setDiscardJob(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Discard this upload?</AlertDialogTitle>
+              <AlertDialogDescription>The photo <span className="font-mono">{discardJob?.filename}</span> stays saved on this phone, but it will not be uploaded. You must then send it using the ZIP export.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => { const j = discardJob; setDiscardJob(null); if (j) void discardUploadJob(j.id).then(reloadJobs); }}>Discard upload</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }

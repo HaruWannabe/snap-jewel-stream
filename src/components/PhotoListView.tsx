@@ -295,6 +295,11 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="font-mono font-medium truncate">{photo.filename}</p>
+                  {photo.connectedSublotId && (
+                    <p className="text-xs text-primary truncate">
+                      Lot {photo.connectedLotNo ?? '?'} · Sublot {photo.connectedSublotNo ?? '?'} · Tray {photo.connectedTrayCode ?? '?'} comp {photo.connectedCompartmentNo ?? '?'}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {formatDate(photo.timestamp)}
                   </p>
@@ -314,6 +319,7 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRenameClick(photo)}
+                    disabled={!!photo.connectedSublotId}
                     title="Rename"
                   >
                     <Pencil className="h-4 w-4" />
@@ -322,6 +328,7 @@ export function PhotoListView({ onBack, onRetake }: PhotoListViewProps) {
                     variant="ghost"
                     size="icon"
                     onClick={() => setRetakingPhoto(photo)}
+                    disabled={!!photo.connectedSublotId}
                     title="Retake"
                   >
                     <RotateCcw className="h-4 w-4" />
