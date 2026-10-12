@@ -31,6 +31,14 @@ function getNextPending(sublot: TaggingLineSublot): number | null {
   return sublot.items.filter((item) => item.status === 'pending').sort((a, b) => a.sequence - b.sequence)[0]?.sequence ?? null;
 }
 
+function overlayLocalPhotos(sublot: TaggingLineSublot, localPhotos: PhotoMetadata[]): TaggingLineSublot {
+  const locallySaved = new Set(localPhotos.map((photo) => photo.connectedSequence));
+  const items = sublot.items.map((item) =>
+    item.status === 'pending' && locallySaved.has(item.sequence) ? { ...item, status: 'done' as const } : item
+  );
+  return { ...sublot, items, done_count: items.filter((item) => item.status === 'done').length };
+}
+
 export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewProps) {
   const { toast } = useToast();
   const [connection, setConnection] = useState<TaggingLineConnection>({ baseUrl: '', deviceKey: '' });
@@ -83,10 +91,11 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
         getSublotPhotos(sublotId),
         getUploadJobs(sublotId),
       ]);
-      setSublot(remote);
+      const merged = overlayLocalPhotos(remote, local);
+      setSublot(merged);
       setPhotos(local);
       setJobs(localJobs);
-      setSelectedSequence(getNextPending(remote));
+      setSelectedSequence(getNextPending(merged));
       setCameraOpen(false);
     } catch (error) {
       toast({ title: 'Could not open sublot', description: error instanceof Error ? error.message : 'Check the server connection.', variant: 'destructive' });
@@ -99,7 +108,12 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     if (!sublot) return;
     const onUploadChange = () => {
       void refreshSublotLocal(sublot.sublot_id);
-      void getTaggingLineSublot(connection, sublot.sublot_id).then(setSublot).catch(() => undefined);
+      void getTaggingLineSublot(connection, sublot.sublot_id).then((remote) => {
+        setPhotos((currentPhotos) => {
+          setSublot(overlayLocalPhotos(remote, currentPhotos));
+          return currentPhotos;
+        });
+      }).catch(() => undefined);
     };
     window.addEventListener('taggingline:uploads', onUploadChange);
     return () => window.removeEventListener('taggingline:uploads', onUploadChange);
@@ -163,16 +177,13 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
         onOpenSettings={onOpenSettings}
         connected={{ connection, sublot, item: selectedItem, uploadCounts: { uploaded, queued } }}
         onConnectedSaved={async () => {
-          await refreshSublotLocal(sublot.sublot_id);
-          try {
-            const updated = await getTaggingLineSublot(connection, sublot.sublot_id);
-            setSublot(updated);
-            const next = getNextPending(updated);
-            setSelectedSequence(next);
-          } catch {
-            const remaining = sublot.items.filter((item) => item.status === 'pending' && item.sequence > selectedItem.sequence).sort((a, b) => a.sequence - b.sequence)[0];
-            setSelectedSequence(remaining?.sequence ?? null);
-          }
+          const nextPhotos = await getSublotPhotos(sublot.sublot_id);
+          const updated = overlayLocalPhotos(sublot, nextPhotos);
+          setPhotos(nextPhotos);
+          setSublot(updated);
+          const next = getNextPending(updated);
+          setSelectedSequence(next);
+          if (next === null) setCameraOpen(false);
         }}
         onExitConnected={() => setCameraOpen(false)}
       />
@@ -194,7 +205,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
         <main className="space-y-4 p-3 pb-safe">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 text-sm">
-            <span>{navigator.onLine ? `Uploaded ${uploaded} · ${pendingJobs} pending` : `Offline — ${pendingJobs} queued`}</span>
+            <span>{navigator.onLine ? `Uploaded ${sublot.done_count}/${sublot.total_items} · ${pendingJobs} pending` : `Offline — ${pendingJobs} queued`}</span>
             <Button size="sm" variant="outline" onClick={() => void exportLocalSublot()}><Download className="mr-1 h-4 w-4" />Export sublot ZIP</Button>
           </div>
           {sublot.trays.map((tray) => {
