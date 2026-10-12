@@ -9,6 +9,10 @@ interface PhotoMetadata {
   date: string; // YYYY-MM-DD for daily counting
   connectedSublotId?: string;
   connectedSequence?: number;
+  connectedLotNo?: string;
+  connectedSublotNo?: number;
+  connectedTrayCode?: string;
+  connectedCompartmentNo?: number;
 }
 
 export interface TaggingLineConnection {
@@ -24,7 +28,7 @@ export interface PhotoUploadJob {
   filename: string;
   baseUrl: string;
   overwrite: boolean;
-  status: 'queued' | 'uploaded';
+  status: 'queued' | 'uploaded' | 'failed';
   attempts: number;
   nextAttemptAt: number;
   createdAt: number;
@@ -131,7 +135,7 @@ export async function savePhoto(
 export async function saveConnectedPhoto(
   blob: Blob,
   filename: string,
-  options: { sublotId: string; sequence: number; baseUrl: string; overwrite: boolean }
+  options: { sublotId: string; sequence: number; baseUrl: string; overwrite: boolean; lotNo?: string; sublotNo?: number; trayCode?: string; compartmentNo?: number }
 ): Promise<{ success: boolean; exists?: boolean; conflict?: boolean; photoId?: string }> {
   const database = await getDB();
   const existing = await database.getFromIndex('photos', 'by-filename', filename);
@@ -151,6 +155,10 @@ export async function saveConnectedPhoto(
     date: now.toISOString().slice(0, 10),
     connectedSublotId: options.sublotId,
     connectedSequence: options.sequence,
+    connectedLotNo: options.lotNo,
+    connectedSublotNo: options.sublotNo,
+    connectedTrayCode: options.trayCode,
+    connectedCompartmentNo: options.compartmentNo,
   };
   const job: PhotoUploadJob = {
     id: `${options.sublotId}:${options.sequence}`,
@@ -173,6 +181,7 @@ export async function saveConnectedPhoto(
     tx.objectStore('uploadQueue').put(job),
     tx.done,
   ]);
+  window.dispatchEvent(new Event('taggingline:capture'));
   return { success: true, photoId };
 }
 
@@ -212,19 +221,42 @@ export async function markUploadSucceeded(jobId: string): Promise<void> {
   window.dispatchEvent(new Event('taggingline:uploads'));
 }
 
+export const MAX_UPLOAD_ATTEMPTS = 8;
+
+/** Decides the next state of a job after a failed attempt: retry with capped backoff, or stop as 'failed'. */
+export function nextUploadRetryState(previousAttempts: number, now = Date.now()): { status: 'queued' | 'failed'; attempts: number; nextAttemptAt: number } {
+  const attempts = previousAttempts + 1;
+  if (attempts >= MAX_UPLOAD_ATTEMPTS) return { status: 'failed', attempts, nextAttemptAt: now };
+  const delay = Math.min(1000 * (2 ** Math.min(attempts - 1, 8)), 5 * 60 * 1000);
+  return { status: 'queued', attempts, nextAttemptAt: now + delay };
+}
+
 export async function scheduleUploadRetry(jobId: string, error: string): Promise<void> {
   const database = await getDB();
   const job = await database.get('uploadQueue', jobId);
   if (!job) return;
-  const attempts = job.attempts + 1;
-  const delay = Math.min(1000 * (2 ** Math.min(attempts - 1, 8)), 5 * 60 * 1000);
   await database.put('uploadQueue', {
     ...job,
-    status: 'queued',
-    attempts,
-    nextAttemptAt: Date.now() + delay,
+    ...nextUploadRetryState(job.attempts),
     lastError: error.slice(0, 300),
   });
+  window.dispatchEvent(new Event('taggingline:uploads'));
+}
+
+/** Puts a failed job back in the queue with a fresh attempt count. */
+export async function retryUploadJob(jobId: string): Promise<void> {
+  const database = await getDB();
+  const job = await database.get('uploadQueue', jobId);
+  if (!job) return;
+  await database.put('uploadQueue', { ...job, status: 'queued', attempts: 0, nextAttemptAt: Date.now() });
+  window.dispatchEvent(new Event('taggingline:uploads'));
+  window.dispatchEvent(new Event('taggingline:capture'));
+}
+
+/** Drops only the upload job; the locally saved photo and its image stay untouched. */
+export async function discardUploadJob(jobId: string): Promise<void> {
+  const database = await getDB();
+  await database.delete('uploadQueue', jobId);
   window.dispatchEvent(new Event('taggingline:uploads'));
 }
 

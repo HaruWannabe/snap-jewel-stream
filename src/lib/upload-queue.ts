@@ -1,5 +1,6 @@
 import {
   getDueUploadJobs,
+  getUploadJobs,
   getPhotoBlob,
   getTaggingLineConnection,
   markUploadSucceeded,
@@ -10,12 +11,18 @@ import { uploadSublotPhoto } from './tagging-line';
 let active = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
+export const FAST_POLL_MS = 2500;
+export const IDLE_POLL_MS = 30000;
+let idle = false;
+
 async function runQueueCycle(): Promise<void> {
   if (active || !navigator.onLine) return;
   active = true;
   try {
     const connection = await getTaggingLineConnection();
     if (!connection.baseUrl || !connection.deviceKey) return;
+    const all = await getUploadJobs();
+    idle = !all.some((job) => job.status === 'queued');
     const jobs = await getDueUploadJobs();
     const batch = jobs.slice(0, 2);
     await Promise.all(batch.map(async (job) => {
@@ -45,15 +52,18 @@ export function startUploadQueue(): () => void {
   let stopped = false;
   const schedule = () => {
     if (stopped) return;
+    if (timer) clearTimeout(timer);
     timer = setTimeout(async () => {
       await runQueueCycle();
       schedule();
-    }, 2500);
+    }, idle ? IDLE_POLL_MS : FAST_POLL_MS);
   };
-  const onOnline = () => { void runQueueCycle(); };
-  const onSettings = () => { void runQueueCycle(); };
+  const wake = () => { idle = false; void runQueueCycle(); schedule(); };
+  const onOnline = wake;
+  const onSettings = wake;
   window.addEventListener('online', onOnline);
   window.addEventListener('taggingline:settings', onSettings);
+  window.addEventListener('taggingline:capture', wake);
   void runQueueCycle();
   schedule();
   return () => {
@@ -61,5 +71,6 @@ export function startUploadQueue(): () => void {
     if (timer) clearTimeout(timer);
     window.removeEventListener('online', onOnline);
     window.removeEventListener('taggingline:settings', onSettings);
+    window.removeEventListener('taggingline:capture', wake);
   };
 }

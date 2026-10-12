@@ -25,7 +25,7 @@ interface CameraViewProps {
     connection: TaggingLineConnection;
     sublot: TaggingLineSublot;
     item: TaggingLineItem;
-    uploadCounts: { uploaded: number; queued: number };
+    uploadCounts: { uploaded: number; queued: number; failed?: number };
   };
 }
 
@@ -195,6 +195,10 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
         sequence: connected.item.sequence,
         baseUrl: connected.connection.baseUrl,
         overwrite: overwrite || connected.item.status === 'done',
+        lotNo: connected.sublot.lot_no,
+        sublotNo: connected.sublot.sublot_no,
+        trayCode: connected.item.tray_code,
+        compartmentNo: connected.item.compartment_no,
       })
       : await savePhoto(blob, selectedPrefix, tagNumber, overwrite);
     
@@ -384,7 +388,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
           <div className="space-y-1 text-center">
             <p className="text-base font-semibold">Tray {connected.item.tray_code} · Compartment {connected.item.compartment_no} · {connected.item.pcs} pcs</p>
             <p className="break-all font-mono text-xs text-muted-foreground">{connected.item.filename}</p>
-            <p className="text-xs text-muted-foreground">{isOnline ? `Uploaded ${connected.uploadCounts.uploaded} · ${connected.uploadCounts.queued} pending` : `Offline — ${connected.uploadCounts.queued} queued`}</p>
+            <p className="text-xs text-muted-foreground">{isOnline ? `Uploaded ${connected.uploadCounts.uploaded} · ${connected.uploadCounts.queued} pending · ${connected.uploadCounts.failed ?? 0} failed` : `Offline — ${connected.uploadCounts.queued} queued`}</p>
           </div>
         ) : <>
         {/* Prefix toggles */}

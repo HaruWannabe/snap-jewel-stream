@@ -62,6 +62,14 @@ export function canFinishSublot(queuedUploads: number): boolean {
   return queuedUploads === 0;
 }
 
+/** Label and enabled state for the finish button always come from the same decision. */
+export function getFinishState(queued: number, failed: number, skipped: number): { label: string; disabled: boolean; needsConfirm: boolean } {
+  if (queued > 0) return { label: `Waiting for ${queued} upload${queued === 1 ? '' : 's'}`, disabled: true, needsConfirm: false };
+  if (failed > 0) return { label: `Finish anyway (${failed} not uploaded)`, disabled: false, needsConfirm: true };
+  if (skipped > 0) return { label: 'Finish anyway (remaining are skipped)', disabled: false, needsConfirm: false };
+  return { label: 'Finish sublot', disabled: false, needsConfirm: false };
+}
+
 export function normalizeTaggingLineBaseUrl(value: string): string {
   const parsed = new URL(value.trim());
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -117,9 +125,13 @@ export async function getTaggingLineSublot(
     `/api/public/photo/sublots/${encodeURIComponent(sublotId)}`
   );
   if (!payload || typeof payload !== 'object') throw new Error('The server returned an invalid sublot response.');
-  if ('sublot' in payload) return payload.sublot;
-  if ('data' in payload) return payload.data;
-  return payload;
+  const outer = payload as unknown as Record<string, unknown>;
+  const inner = ('sublot' in payload && payload.sublot) || ('data' in payload && payload.data) || payload;
+  const merged = { ...outer, ...(inner as object) } as TaggingLineSublot & Record<string, unknown>;
+  if (!merged.product_name && typeof outer.product_name === 'string') merged.product_name = outer.product_name;
+  merged.trays = Array.isArray(merged.trays) ? merged.trays : [];
+  merged.items = Array.isArray(merged.items) ? merged.items : [];
+  return merged;
 }
 
 export async function uploadSublotPhoto(
@@ -134,7 +146,7 @@ export async function uploadSublotPhoto(
   form.append('file', blob, filename);
   return apiRequest(
     connection,
-    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo`,
+    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo${overwrite ? '?overwrite=true' : ''}`,
     { method: 'POST', body: form }
   );
 }
