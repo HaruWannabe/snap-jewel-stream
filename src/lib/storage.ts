@@ -135,6 +135,9 @@ export async function saveConnectedPhoto(
 ): Promise<{ success: boolean; exists?: boolean; photoId?: string }> {
   const database = await getDB();
   const existing = await database.getFromIndex('photos', 'by-filename', filename);
+  if (existing && (existing.connectedSublotId !== options.sublotId || existing.connectedSequence !== options.sequence)) {
+    return { success: false, exists: true, conflict: true };
+  }
   if (existing && !options.overwrite) return { success: false, exists: true };
 
   const photoId = existing?.id || crypto.randomUUID();
@@ -240,6 +243,16 @@ export async function checkFilenameExists(prefix: string, tagNumber: string): Pr
 export async function checkExactFilenameExists(filename: string): Promise<boolean> {
   const database = await getDB();
   return Boolean(await database.getFromIndex('photos', 'by-filename', filename));
+}
+
+export async function isFilenameOwnedByConnectedItem(
+  filename: string,
+  sublotId: string,
+  sequence: number
+): Promise<boolean> {
+  const database = await getDB();
+  const photo = await database.getFromIndex('photos', 'by-filename', filename);
+  return photo?.connectedSublotId === sublotId && photo.connectedSequence === sequence;
 }
 
 export async function getTodayCount(): Promise<number> {
