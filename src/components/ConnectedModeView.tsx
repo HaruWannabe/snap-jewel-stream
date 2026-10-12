@@ -78,12 +78,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     else setLoading(false);
   }, [connection, refreshQueue]);
 
-  const refreshSublotLocal = useCallback(async (sublotId: string) => {
-    const [nextPhotos, nextJobs] = await Promise.all([getSublotPhotos(sublotId), getUploadJobs(sublotId)]);
-    setPhotos(nextPhotos);
-    setJobs(nextJobs);
-  }, []);
-
   const openSublot = useCallback(async (sublotId: string) => {
     setLoading(true);
     try {
@@ -109,18 +103,20 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   useEffect(() => {
     if (!sublot) return;
     const onUploadChange = () => {
-      void refreshSublotLocal(sublot.sublot_id);
-      void getTaggingLineSublot(connection, sublot.sublot_id).then((remote) => {
+      void Promise.all([
+        getTaggingLineSublot(connection, sublot.sublot_id),
+        getSublotPhotos(sublot.sublot_id),
+        getUploadJobs(sublot.sublot_id),
+      ]).then(([remote, local, nextJobs]) => {
         setServerDoneCount(remote.done_count);
-        setPhotos((currentPhotos) => {
-          setSublot(overlayLocalPhotos(remote, currentPhotos));
-          return currentPhotos;
-        });
+        setPhotos(local);
+        setJobs(nextJobs);
+        setSublot(overlayLocalPhotos(remote, local));
       }).catch(() => undefined);
     };
     window.addEventListener('taggingline:uploads', onUploadChange);
     return () => window.removeEventListener('taggingline:uploads', onUploadChange);
-  }, [connection, refreshSublotLocal, sublot]);
+  }, [connection, sublot]);
 
   const uploadJobs = useMemo(() => jobs, [jobs]);
   const queued = uploadJobs.filter((job) => job.status === 'queued').length;
