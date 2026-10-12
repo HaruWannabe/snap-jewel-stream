@@ -128,10 +128,9 @@ export async function uploadSublotPhoto(
 ): Promise<{ ok: boolean; sequence: number; filename: string; done_count: number; skipped_count: number; total: number }> {
   const form = new FormData();
   form.append('file', blob, filename);
-  const query = overwrite ? '?overwrite=true' : '';
   return apiRequest(
     connection,
-    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo${query}`,
+    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo`,
     { method: 'POST', body: form }
   );
 }
