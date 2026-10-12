@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Trash2, Download, AlertTriangle, HardDrive, Share2 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Download, AlertTriangle, HardDrive, Share2, Link2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,10 +17,14 @@ import {
   getStorageUsage,
   deleteAllPhotos,
   getAllPhotos,
+  getTaggingLineConnection,
+  saveTaggingLineConnection,
+  type TaggingLineConnection,
   PrefixItem,
 } from '@/lib/storage';
 import { EXPORT_BATCH_SIZE, exportPhotoBatch, exportAndShareAllBatches, type ExportablePhoto } from '@/lib/export';
 import { useToast } from '@/hooks/use-toast';
+import { normalizeTaggingLineBaseUrl, testTaggingLineConnection } from '@/lib/tagging-line';
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -46,6 +50,9 @@ export function SettingsView({ onBack }: SettingsViewProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSharingAll, setIsSharingAll] = useState(false);
   const [sharingProgress, setSharingProgress] = useState({ currentBatch: 0, totalBatches: 0, photosInBatch: 0, totalPhotosInBatch: 0 });
+  const [connection, setConnection] = useState<TaggingLineConnection>({ baseUrl: '', deviceKey: '' });
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -57,6 +64,43 @@ export function SettingsView({ onBack }: SettingsViewProps) {
     
     const usage = await getStorageUsage();
     setStorageInfo(usage);
+    setConnection(await getTaggingLineConnection());
+  };
+
+  const handleSaveConnection = async () => {
+    try {
+      const normalized = connection.baseUrl.trim()
+        ? normalizeTaggingLineBaseUrl(connection.baseUrl)
+        : '';
+      const next = { ...connection, baseUrl: normalized, deviceKey: connection.deviceKey.trim() };
+      await saveTaggingLineConnection(next);
+      setConnection(next);
+      setConnectionStatus(null);
+      toast({ title: 'Connection saved', description: 'These settings are stored on this device.' });
+    } catch (error) {
+      toast({ title: 'Invalid server address', description: error instanceof Error ? error.message : 'Enter a valid server address.', variant: 'destructive' });
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setIsTestingConnection(true);
+    setConnectionStatus(null);
+    try {
+      const normalized = normalizeTaggingLineBaseUrl(connection.baseUrl);
+      const next = { ...connection, baseUrl: normalized, deviceKey: connection.deviceKey.trim() };
+      if (!next.deviceKey) throw new Error('Enter the device key first.');
+      await saveTaggingLineConnection(next);
+      setConnection(next);
+      const count = await testTaggingLineConnection(next);
+      setConnectionStatus(`Connected · ${count} sublot${count === 1 ? '' : 's'} available`);
+      toast({ title: 'Connection successful', description: `${count} sublots are available.` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to reach the server.';
+      setConnectionStatus(message);
+      toast({ title: 'Connection test failed', description: message, variant: 'destructive' });
+    } finally {
+      setIsTestingConnection(false);
+    }
   };
 
   const handleAddPrefix = async () => {
@@ -273,6 +317,30 @@ export function SettingsView({ onBack }: SettingsViewProps) {
       </div>
       
       <div className="p-4 space-y-6 pb-safe">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Link2 className="h-5 w-5" />Tagging Line connection</CardTitle>
+            <CardDescription>Connected work is optional. Manual photo capture remains available.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1.5">
+              <label htmlFor="tagging-line-url" className="text-sm font-medium">Server base URL</label>
+              <Input id="tagging-line-url" type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="https://server.example" value={connection.baseUrl} onChange={(event) => setConnection((value) => ({ ...value, baseUrl: event.target.value }))} maxLength={2048} />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="tagging-line-key" className="text-sm font-medium">Device key</label>
+              <Input id="tagging-line-key" type="password" autoCapitalize="none" autoCorrect="off" placeholder="Device key" value={connection.deviceKey} onChange={(event) => setConnection((value) => ({ ...value, deviceKey: event.target.value }))} maxLength={1024} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={handleSaveConnection}>Save connection</Button>
+              <Button onClick={handleTestConnection} disabled={isTestingConnection || !connection.baseUrl.trim() || !connection.deviceKey.trim()}>
+                {isTestingConnection ? 'Testing…' : 'Test connection'}
+              </Button>
+            </div>
+            {connectionStatus && <p className="flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="h-4 w-4" />{connectionStatus}</p>}
+          </CardContent>
+        </Card>
+
         {/* Product Prefixes */}
         <Card>
           <CardHeader>

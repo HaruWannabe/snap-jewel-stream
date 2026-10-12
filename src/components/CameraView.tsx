@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Settings, Lock, Unlock, AlertCircle, Eye, List } from 'lucide-react';
+import { Camera, Settings, Lock, Unlock, AlertCircle, Eye, List, Layers, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useCamera } from '@/hooks/useCamera';
-import { getPrefixes, savePhoto, checkFilenameExists, getTodayCount, PrefixItem } from '@/lib/storage';
+import { getPrefixes, savePhoto, checkFilenameExists, checkExactFilenameExists, saveConnectedPhoto, getTodayCount, PrefixItem, TaggingLineConnection } from '@/lib/storage';
+import type { TaggingLineItem, TaggingLineSublot } from '@/lib/tagging-line';
 import { detectBlur } from '@/lib/blur-detection';
 import { BlurWarningDialog } from './BlurWarningDialog';
 import { DuplicateWarningDialog } from './DuplicateWarningDialog';
@@ -16,9 +17,18 @@ import { cn } from '@/lib/utils';
 
 interface CameraViewProps {
   onOpenSettings: () => void;
+  onOpenConnected?: () => void;
+  onExitConnected?: () => void;
+  onConnectedSaved?: () => void | Promise<void>;
+  connected?: {
+    connection: TaggingLineConnection;
+    sublot: TaggingLineSublot;
+    item: TaggingLineItem;
+    uploadCounts: { uploaded: number; queued: number };
+  };
 }
 
-export function CameraView({ onOpenSettings }: CameraViewProps) {
+export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, onConnectedSaved, connected }: CameraViewProps) {
   const {
     videoRef,
     canvasRef,
@@ -81,7 +91,7 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
   }, [isReady]);
 
   const filename = selectedPrefix && tagNumber ? `${selectedPrefix}${tagNumber}.jpg` : '';
-  const canCapture = isReady && selectedPrefix && tagNumber.trim() && !isCapturing;
+  const canCapture = isReady && (connected ? Boolean(connected.item.filename) : Boolean(selectedPrefix && tagNumber.trim())) && !isCapturing;
 
   const handleVideoTap = (e: React.MouseEvent<HTMLVideoElement>) => {
     handleTapToFocus(e.clientX, e.clientY);
@@ -100,7 +110,9 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
       }
       
       // Check for duplicate first
-      const exists = await checkFilenameExists(selectedPrefix, tagNumber);
+      const exists = connected
+        ? await checkExactFilenameExists(connected.item.filename)
+        : await checkFilenameExists(selectedPrefix, tagNumber);
       if (exists) {
         setPendingBlob(blob);
         setDuplicateDialogOpen(true);
@@ -157,7 +169,14 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
   };
 
   const savePhotoAndReset = async (blob: Blob, overwrite: boolean) => {
-    const result = await savePhoto(blob, selectedPrefix, tagNumber, overwrite);
+    const result = connected
+      ? await saveConnectedPhoto(blob, connected.item.filename, {
+        sublotId: connected.sublot.sublot_id,
+        sequence: connected.item.sequence,
+        baseUrl: connected.connection.baseUrl,
+        overwrite,
+      })
+      : await savePhoto(blob, selectedPrefix, tagNumber, overwrite);
     
     if (result.success) {
       // Success feedback
@@ -169,9 +188,13 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
       setTodayCount(count);
       
       // Reset for next capture
-      setTagNumber('');
+      if (!connected) setTagNumber('');
       setPendingBlob(null);
       setIsCapturing(false);
+      if (connected) {
+        await onConnectedSaved?.();
+        return;
+      }
       
       // Refocus input
       setTimeout(() => {
@@ -248,7 +271,13 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
           <Camera className="h-5 w-5 text-primary" />
           <span className="font-medium">Today: {todayCount} photos</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {connected ? (
+            <Button variant="ghost" size="icon" aria-label="Back to tray grid" onClick={onExitConnected}><ArrowLeft className="h-5 w-5" /></Button>
+          ) : onOpenConnected ? (
+            <Button variant="outline" size="sm" onClick={onOpenConnected} className="flex items-center gap-1"><Layers className="h-4 w-4" /><span>Work queue</span></Button>
+          ) : null}
+          {!connected && <>
           <Button
             variant="outline"
             size="sm"
@@ -267,6 +296,7 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
               onCheckedChange={setPreviewEnabled}
             />
           </div>
+          </>}
           <Button variant="ghost" size="icon" onClick={onOpenSettings}>
             <Settings className="h-5 w-5" />
           </Button>
@@ -325,6 +355,13 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
       
       {/* Controls */}
       <div className="bg-card border-t border-border p-4 space-y-4 pb-safe">
+        {connected ? (
+          <div className="space-y-1 text-center">
+            <p className="text-base font-semibold">Tray {connected.item.tray_code} · Compartment {connected.item.compartment_no} · {connected.item.pcs} pcs</p>
+            <p className="break-all font-mono text-xs text-muted-foreground">{connected.item.filename}</p>
+            <p className="text-xs text-muted-foreground">{navigator.onLine ? `Uploaded ${connected.uploadCounts.uploaded} · ${connected.uploadCounts.queued} pending` : `Offline — ${connected.uploadCounts.queued} queued`}</p>
+          </div>
+        ) : <>
         {/* Prefix toggles */}
         <ToggleGroup
           type="single"
@@ -370,6 +407,7 @@ export function CameraView({ onOpenSettings }: CameraViewProps) {
             </p>
           )}
         </div>
+        </>}
         
         {/* Capture button */}
         <Button
