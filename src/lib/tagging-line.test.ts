@@ -12,6 +12,8 @@ describe('Tagging Line client', () => {
   it('accepts only HTTP(S) server addresses and normalizes a trailing slash', () => {
     expect(normalizeTaggingLineBaseUrl(' https://line.example/ ')).toBe('https://line.example');
     expect(() => normalizeTaggingLineBaseUrl('javascript:alert(1)')).toThrow();
+    expect(() => normalizeTaggingLineBaseUrl('https://user:pass@line.example')).toThrow();
+    expect(() => normalizeTaggingLineBaseUrl('https://line.example?key=value')).toThrow();
   });
 
   it('sends the device key and accepts a direct queue array', async () => {

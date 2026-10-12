@@ -384,7 +384,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
           <div className="space-y-1 text-center">
             <p className="text-base font-semibold">Tray {connected.item.tray_code} · Compartment {connected.item.compartment_no} · {connected.item.pcs} pcs</p>
             <p className="break-all font-mono text-xs text-muted-foreground">{connected.item.filename}</p>
-            <p className="text-xs text-muted-foreground">{isOnline ? `Uploaded ${connected.uploadCounts.uploaded}/${connected.sublot.total_items} · ${connected.uploadCounts.queued} pending` : `Offline — ${connected.uploadCounts.queued} queued`}</p>
+            <p className="text-xs text-muted-foreground">{isOnline ? `Uploaded ${connected.uploadCounts.uploaded} · ${connected.uploadCounts.queued} pending` : `Offline — ${connected.uploadCounts.queued} queued`}</p>
           </div>
         ) : <>
         {/* Prefix toggles */}
