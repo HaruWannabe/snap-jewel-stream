@@ -27,7 +27,7 @@ describe('Tagging Line client', () => {
     await getTaggingLineSublot({ baseUrl: 'https://line.example', deviceKey: 'key' }, 'lot/a');
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://line.example/api/public/photo/sublots/lot%2Fa');
 
-    const uploadMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    const uploadMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
     const blob = new Blob(['photo'], { type: 'image/jpeg' });
     await uploadSublotPhoto({ baseUrl: 'https://line.example', deviceKey: 'key' }, 'lot/a', 9, 'AWMS0009.final.jpg', blob, true);
     const [url, options] = uploadMock.mock.calls[0] ?? [];

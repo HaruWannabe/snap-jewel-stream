@@ -132,7 +132,7 @@ export async function saveConnectedPhoto(
   blob: Blob,
   filename: string,
   options: { sublotId: string; sequence: number; baseUrl: string; overwrite: boolean }
-): Promise<{ success: boolean; exists?: boolean; photoId?: string }> {
+): Promise<{ success: boolean; exists?: boolean; conflict?: boolean; photoId?: string }> {
   const database = await getDB();
   const existing = await database.getFromIndex('photos', 'by-filename', filename);
   if (existing && (existing.connectedSublotId !== options.sublotId || existing.connectedSequence !== options.sequence)) {

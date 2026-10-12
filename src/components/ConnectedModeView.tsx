@@ -51,6 +51,18 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   const [jobs, setJobs] = useState<PhotoUploadJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const online = () => setIsOnline(true);
+    const offline = () => setIsOnline(false);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
+    };
+  }, []);
 
   const refreshQueue = useCallback(async (showSpinner = false) => {
     if (!connection.baseUrl || !connection.deviceKey) {
@@ -206,7 +218,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
         <main className="space-y-4 p-3 pb-safe">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 text-sm">
-            <span>{navigator.onLine ? `Uploaded ${sublot.done_count}/${sublot.total_items} · ${pendingJobs} pending` : `Offline — ${pendingJobs} queued`}</span>
+            <span>{isOnline ? `Uploaded ${uploaded}/${sublot.total_items} · ${pendingJobs} pending` : `Offline — ${pendingJobs} queued`}</span>
             <Button size="sm" variant="outline" onClick={() => void exportLocalSublot()}><Download className="mr-1 h-4 w-4" />Export sublot ZIP</Button>
           </div>
           {sublot.trays.map((tray) => {
@@ -277,7 +289,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
         {loading ? <p className="py-8 text-center text-sm text-muted-foreground">Loading work queue…</p> : null}
         {!loading && connection.baseUrl && connection.deviceKey && queue.length === 0 ? <div className="py-10 text-center text-muted-foreground">No sublots in the queue.</div> : null}
         {queue.map((entry) => <Card key={entry.sublot_id} className="cursor-pointer" onClick={() => void openSublot(entry.sublot_id)}><CardContent className="flex items-center justify-between gap-3 p-4"><div className="min-w-0"><p className="font-semibold">{entry.lot_no} · Sublot {entry.sublot_no}</p><p className="truncate text-sm text-muted-foreground">{entry.product_name}</p><p className="mt-1 text-xs text-muted-foreground">{entry.compcode} · {entry.ic}</p></div><div className="shrink-0 text-right"><p className="font-mono text-sm">{entry.done_count} / {entry.total_items}</p><p className="text-xs text-muted-foreground">done</p></div></CardContent></Card>)}
-        {connection.baseUrl && connection.deviceKey && !navigator.onLine && <p className="flex items-center gap-2 text-xs text-muted-foreground"><WifiOff className="h-4 w-4" />Offline — saved photos will upload when connected.</p>}
+        {connection.baseUrl && connection.deviceKey && !isOnline && <p className="flex items-center gap-2 text-xs text-muted-foreground"><WifiOff className="h-4 w-4" />Offline — saved photos will upload when connected.</p>}
       </main>
     </div>
   );

@@ -6,7 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useCamera } from '@/hooks/useCamera';
-import { getPrefixes, savePhoto, checkFilenameExists, checkExactFilenameExists, saveConnectedPhoto, getTodayCount, PrefixItem, TaggingLineConnection } from '@/lib/storage';
+import { getPrefixes, savePhoto, checkFilenameExists, checkExactFilenameExists, isFilenameOwnedByConnectedItem, saveConnectedPhoto, getTodayCount, PrefixItem, TaggingLineConnection } from '@/lib/storage';
 import type { TaggingLineItem, TaggingLineSublot } from '@/lib/tagging-line';
 import { detectBlur } from '@/lib/blur-detection';
 import { BlurWarningDialog } from './BlurWarningDialog';
@@ -14,6 +14,7 @@ import { DuplicateWarningDialog } from './DuplicateWarningDialog';
 import { PhotoPreviewDialog } from './PhotoPreviewDialog';
 import { PhotoListView } from './PhotoListView';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface CameraViewProps {
   onOpenSettings: () => void;
@@ -29,6 +30,7 @@ interface CameraViewProps {
 }
 
 export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, onConnectedSaved, connected }: CameraViewProps) {
+  const { toast } = useToast();
   const {
     videoRef,
     canvasRef,
@@ -123,9 +125,14 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       }
       
       // Check for duplicate first
-      const exists = connected
+      const filenameExists = connected
         ? await checkExactFilenameExists(connected.item.filename)
         : await checkFilenameExists(selectedPrefix, tagNumber);
+      const exists = filenameExists && (!connected || !await isFilenameOwnedByConnectedItem(
+        connected.item.filename,
+        connected.sublot.sublot_id,
+        connected.item.sequence
+      ));
       if (exists) {
         setPendingBlob(blob);
         setDuplicateDialogOpen(true);
@@ -215,6 +222,13 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       }, 100);
     } else {
       setIsCapturing(false);
+      if (connected) {
+        toast({
+          title: 'Photo not saved',
+          description: 'This filename belongs to another saved photo on this device. Existing photos were left unchanged.',
+          variant: 'destructive',
+        });
+      }
     }
   };
 
