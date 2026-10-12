@@ -2,12 +2,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getTaggingLineQueue,
   getTaggingLineSublot,
+  canFinishSublot,
   normalizeTaggingLineBaseUrl,
   uploadSublotPhoto,
 } from './tagging-line';
 
 describe('Tagging Line client', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('does not allow finishing while any photo uploads remain queued', () => {
+    expect(canFinishSublot(1)).toBe(false);
+    expect(canFinishSublot(0)).toBe(true);
+  });
 
   it('accepts only HTTP(S) server addresses and normalizes a trailing slash', () => {
     expect(normalizeTaggingLineBaseUrl(' https://line.example/ ')).toBe('https://line.example');
@@ -33,7 +39,7 @@ describe('Tagging Line client', () => {
     const blob = new Blob(['photo'], { type: 'image/jpeg' });
     await uploadSublotPhoto({ baseUrl: 'https://line.example', deviceKey: 'key' }, 'lot/a', 9, 'AWMS0009.final.jpg', blob, true);
     const [url, options] = uploadMock.mock.calls[0] ?? [];
-    expect(url).toBe('https://line.example/api/public/photo/sublots/lot%2Fa/items/9/photo?overwrite=true');
+    expect(url).toBe('https://line.example/api/public/photo/sublots/lot%2Fa/items/9/photo');
     expect(options?.body).toBeInstanceOf(FormData);
     const file = (options?.body as FormData).get('file');
     expect(file).toBeInstanceOf(File);

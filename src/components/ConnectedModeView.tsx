@@ -14,6 +14,7 @@ import {
 import { exportPhotoBatch } from '@/lib/export';
 import {
   completeTaggingLineSublot,
+  canFinishSublot,
   getTaggingLineQueue,
   getTaggingLineSublot,
   skipSublotItem,
@@ -44,7 +45,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   const [connection, setConnection] = useState<TaggingLineConnection>({ baseUrl: '', deviceKey: '' });
   const [queue, setQueue] = useState<TaggingLineQueueEntry[]>([]);
   const [sublot, setSublot] = useState<TaggingLineSublot | null>(null);
-  const [serverDoneCount, setServerDoneCount] = useState(0);
   const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [photos, setPhotos] = useState<PhotoMetadata[]>([]);
@@ -108,7 +108,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       ]);
       const merged = overlayLocalPhotos(remote, local);
       setSublot(merged);
-      setServerDoneCount(remote.done_count);
       setPhotos(local);
       setJobs(localJobs);
       setSelectedSequence(getNextPending(merged));
@@ -128,7 +127,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
         getSublotPhotos(sublot.sublot_id),
         getUploadJobs(sublot.sublot_id),
       ]).then(([remote, local, nextJobs]) => {
-        setServerDoneCount(remote.done_count);
         setPhotos(local);
         setJobs(nextJobs);
         setSublot(overlayLocalPhotos(remote, local));
@@ -153,7 +151,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     try {
       await skipSublotItem(connection, sublot.sublot_id, sequence, reason.trim().slice(0, 160));
       const updated = await getTaggingLineSublot(connection, sublot.sublot_id);
-      setServerDoneCount(updated.done_count);
       setSublot(updated);
       setSelectedSequence(getNextPending(updated));
     } catch (error) {
@@ -163,7 +160,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
   const handleFinish = async () => {
     if (!sublot) return;
-    if (queued > 0) {
+    if (!canFinishSublot(queued)) {
       toast({ title: 'Uploads still pending', description: `${queued} photo${queued === 1 ? '' : 's'} still need to upload. Finish after they are sent.` });
       return;
     }
@@ -301,7 +298,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           </div>}
           {pendingItem === null && <div className="space-y-2 border-t border-border pt-4">
             {pendingJobs > 0 && <p className="text-sm text-muted-foreground">{pendingJobs} photo upload{pendingJobs === 1 ? '' : 's'} remain queued.</p>}
-            <Button className="w-full" onClick={() => void handleFinish()} disabled={pendingJobs > 0}>{allRemainingSkipped ? 'Finish anyway (remaining are skipped)' : 'Finish sublot'}</Button>
+            <Button className="w-full" onClick={() => void handleFinish()} disabled={!canFinishSublot(pendingJobs)}>{allRemainingSkipped ? 'Finish anyway (remaining are skipped)' : 'Finish sublot'}</Button>
           </div>}
         </main>
       </div>

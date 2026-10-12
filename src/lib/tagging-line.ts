@@ -58,6 +58,10 @@ export class TaggingLineError extends Error {
   }
 }
 
+export function canFinishSublot(queuedUploads: number): boolean {
+  return queuedUploads === 0;
+}
+
 export function normalizeTaggingLineBaseUrl(value: string): string {
   const parsed = new URL(value.trim());
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -128,10 +132,9 @@ export async function uploadSublotPhoto(
 ): Promise<{ ok: boolean; sequence: number; filename: string; done_count: number; skipped_count: number; total: number }> {
   const form = new FormData();
   form.append('file', blob, filename);
-  const query = overwrite ? '?overwrite=true' : '';
   return apiRequest(
     connection,
-    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo${query}`,
+    `/api/public/photo/sublots/${encodeURIComponent(sublotId)}/items/${sequence}/photo`,
     { method: 'POST', body: form }
   );
 }
