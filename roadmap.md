@@ -1,4 +1,4 @@
 - [x] Add persistent IndexedDB connection settings and upload queue without changing existing photo/blob records.
 - [x] Add authenticated Tagging Line API client, connection test, queue and sublot tray-grid views.
 - [x] Integrate connected capture with server-provided filenames, local-first saving, retry uploads, skip/finish, and per-sublot ZIP export while preserving manual mode.
-- [ ] Validate upgrade safety and the new connected flows with tests and preview build logs.
+- [x] Validate upgrade safety and Connected Mode with automated tests, preview build status, and a simulated local-first capture/upload flow.
