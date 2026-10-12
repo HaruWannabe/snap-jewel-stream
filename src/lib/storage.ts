@@ -299,7 +299,6 @@ export async function getAllPhotos(): Promise<PhotoMetadata[]> {
   return database.getAll('photos');
 }
 
-export type { PhotoMetadata };
 
 export async function renamePhoto(
   id: string,
