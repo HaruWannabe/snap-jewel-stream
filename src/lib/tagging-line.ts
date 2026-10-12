@@ -58,6 +58,10 @@ export class TaggingLineError extends Error {
   }
 }
 
+export function canFinishSublot(queuedUploads: number): boolean {
+  return queuedUploads === 0;
+}
+
 export function normalizeTaggingLineBaseUrl(value: string): string {
   const parsed = new URL(value.trim());
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {

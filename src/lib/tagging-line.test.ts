@@ -2,12 +2,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getTaggingLineQueue,
   getTaggingLineSublot,
+  canFinishSublot,
   normalizeTaggingLineBaseUrl,
   uploadSublotPhoto,
 } from './tagging-line';
 
 describe('Tagging Line client', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('does not allow finishing while any photo uploads remain queued', () => {
+    expect(canFinishSublot(1)).toBe(false);
+    expect(canFinishSublot(0)).toBe(true);
+  });
 
   it('accepts only HTTP(S) server addresses and normalizes a trailing slash', () => {
     expect(normalizeTaggingLineBaseUrl(' https://line.example/ ')).toBe('https://line.example');
