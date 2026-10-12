@@ -143,7 +143,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   const uploaded = serverDoneCount;
   const selectedItem = sublot?.items.find((item) => item.sequence === selectedSequence) ?? null;
   const pendingItem = sublot ? getNextPending(sublot) : null;
-  const canFinishAnyway = Boolean(sublot && sublot.items.some((item) => item.status === 'skipped') && sublot.items.every((item) => item.status !== 'pending'));
+  const allRemainingSkipped = Boolean(sublot && sublot.items.some((item) => item.status === 'skipped') && sublot.items.every((item) => item.status !== 'pending'));
 
   const handleSkip = async (sequence: number) => {
     const item = sublot?.items.find((candidate) => candidate.sequence === sequence);
@@ -163,7 +163,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
   const handleFinish = async (finishAnyway = false) => {
     if (!sublot) return;
-    if (queued > 0 && !(finishAnyway && canFinishAnyway)) {
+    if (queued > 0) {
       toast({ title: 'Uploads still pending', description: `${queued} photo${queued === 1 ? '' : 's'} still need to upload. Finish after they are sent.` });
       return;
     }
@@ -301,8 +301,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           </div>}
           {pendingItem === null && <div className="space-y-2 border-t border-border pt-4">
             {pendingJobs > 0 && <p className="text-sm text-muted-foreground">{pendingJobs} photo upload{pendingJobs === 1 ? '' : 's'} remain queued.</p>}
-            <Button className="w-full" onClick={() => void handleFinish()} disabled={pendingJobs > 0}>Finish sublot</Button>
-            {pendingJobs > 0 && canFinishAnyway && <Button className="w-full" variant="outline" onClick={() => void handleFinish(true)}>Finish anyway (remaining are skipped)</Button>}
+            <Button className="w-full" onClick={() => void handleFinish()} disabled={pendingJobs > 0}>{allRemainingSkipped ? 'Finish anyway (remaining are skipped)' : 'Finish sublot'}</Button>
           </div>}
         </main>
       </div>
