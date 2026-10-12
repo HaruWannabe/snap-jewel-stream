@@ -1,6 +1,6 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
-interface PhotoMetadata {
+export interface PhotoMetadata {
   id: string;
   filename: string;
   prefix: string;

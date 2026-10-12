@@ -156,7 +156,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   const uploaded = uploadJobs.filter((job) => job.status === 'uploaded').length;
   const selectedItem = sublot?.items.find((item) => item.sequence === selectedSequence) ?? null;
   const pendingItem = sublot ? getNextPending(sublot) : null;
-  const allRemainingSkipped = Boolean(sublot && sublot.items.some((item) => item.status === 'skipped') && sublot.items.every((item) => item.status !== 'pending'));
 
   const handleSkip = (sequence: number) => {
     const item = sublot?.items.find((candidate) => candidate.sequence === sequence);
