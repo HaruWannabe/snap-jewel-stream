@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Camera, Check, Download, RefreshCw, WifiOff } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Camera, Download, RefreshCw, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
@@ -31,28 +31,58 @@ function getNextPending(sublot: TaggingLineSublot): number | null {
   return sublot.items.filter((item) => item.status === 'pending').sort((a, b) => a.sequence - b.sequence)[0]?.sequence ?? null;
 }
 
+function overlayLocalPhotos(sublot: TaggingLineSublot, localPhotos: PhotoMetadata[]): TaggingLineSublot {
+  const locallySaved = new Set(localPhotos.map((photo) => photo.connectedSequence));
+  const items = sublot.items.map((item) =>
+    item.status === 'pending' && locallySaved.has(item.sequence) ? { ...item, status: 'done' as const } : item
+  );
+  return { ...sublot, items, done_count: items.filter((item) => item.status === 'done').length };
+}
+
 export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewProps) {
   const { toast } = useToast();
   const [connection, setConnection] = useState<TaggingLineConnection>({ baseUrl: '', deviceKey: '' });
   const [queue, setQueue] = useState<TaggingLineQueueEntry[]>([]);
   const [sublot, setSublot] = useState<TaggingLineSublot | null>(null);
+  const [serverDoneCount, setServerDoneCount] = useState(0);
   const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [photos, setPhotos] = useState<PhotoMetadata[]>([]);
   const [jobs, setJobs] = useState<PhotoUploadJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const skipTimers = useRef(new Map<number, { timer: ReturnType<typeof setTimeout>; triggered: boolean }>());
+
+  useEffect(() => {
+    const online = () => setIsOnline(true);
+    const offline = () => setIsOnline(false);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
+      skipTimers.current.forEach(({ timer }) => clearTimeout(timer));
+      skipTimers.current.clear();
+    };
+  }, []);
 
   const refreshQueue = useCallback(async (showSpinner = false) => {
     if (!connection.baseUrl || !connection.deviceKey) {
       setQueue([]);
+      setQueueError(null);
       setLoading(false);
       return;
     }
     if (showSpinner) setRefreshing(true);
     try {
       setQueue(await getTaggingLineQueue(connection));
+      setQueueError(null);
     } catch (error) {
-      toast({ title: 'Could not load work queue', description: error instanceof Error ? error.message : 'Check the server connection.', variant: 'destructive' });
+      const message = error instanceof Error ? error.message : 'Check the server connection.';
+      setQueueError(message);
+      toast({ title: 'Could not load work queue', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -68,12 +98,6 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     else setLoading(false);
   }, [connection, refreshQueue]);
 
-  const refreshSublotLocal = useCallback(async (sublotId: string) => {
-    const [nextPhotos, nextJobs] = await Promise.all([getSublotPhotos(sublotId), getUploadJobs(sublotId)]);
-    setPhotos(nextPhotos);
-    setJobs(nextJobs);
-  }, []);
-
   const openSublot = useCallback(async (sublotId: string) => {
     setLoading(true);
     try {
@@ -82,10 +106,13 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
         getSublotPhotos(sublotId),
         getUploadJobs(sublotId),
       ]);
-      setSublot(remote);
+      const merged = overlayLocalPhotos(remote, local);
+      setSublot(merged);
+      setServerDoneCount(remote.done_count);
       setPhotos(local);
       setJobs(localJobs);
-      setSelectedSequence(getNextPending(remote));
+      setSelectedSequence(getNextPending(merged));
+      setCameraOpen(getNextPending(merged) !== null);
     } catch (error) {
       toast({ title: 'Could not open sublot', description: error instanceof Error ? error.message : 'Check the server connection.', variant: 'destructive' });
     } finally {
@@ -96,19 +123,27 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
   useEffect(() => {
     if (!sublot) return;
     const onUploadChange = () => {
-      void refreshSublotLocal(sublot.sublot_id);
-      void getTaggingLineSublot(connection, sublot.sublot_id).then(setSublot).catch(() => undefined);
+      void Promise.all([
+        getTaggingLineSublot(connection, sublot.sublot_id),
+        getSublotPhotos(sublot.sublot_id),
+        getUploadJobs(sublot.sublot_id),
+      ]).then(([remote, local, nextJobs]) => {
+        setServerDoneCount(remote.done_count);
+        setPhotos(local);
+        setJobs(nextJobs);
+        setSublot(overlayLocalPhotos(remote, local));
+      }).catch(() => undefined);
     };
     window.addEventListener('taggingline:uploads', onUploadChange);
     return () => window.removeEventListener('taggingline:uploads', onUploadChange);
-  }, [connection, refreshSublotLocal, sublot]);
+  }, [connection, sublot]);
 
   const uploadJobs = useMemo(() => jobs, [jobs]);
   const queued = uploadJobs.filter((job) => job.status === 'queued').length;
   const uploaded = uploadJobs.filter((job) => job.status === 'uploaded').length;
   const selectedItem = sublot?.items.find((item) => item.sequence === selectedSequence) ?? null;
   const pendingItem = sublot ? getNextPending(sublot) : null;
-  const canFinishAnyway = Boolean(sublot && sublot.items.some((item) => item.status === 'skipped') && sublot.items.every((item) => item.status !== 'pending'));
+  const allRemainingSkipped = Boolean(sublot && sublot.items.some((item) => item.status === 'skipped') && sublot.items.every((item) => item.status !== 'pending'));
 
   const handleSkip = async (sequence: number) => {
     const item = sublot?.items.find((candidate) => candidate.sequence === sequence);
@@ -118,6 +153,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     try {
       await skipSublotItem(connection, sublot.sublot_id, sequence, reason.trim().slice(0, 160));
       const updated = await getTaggingLineSublot(connection, sublot.sublot_id);
+      setServerDoneCount(updated.done_count);
       setSublot(updated);
       setSelectedSequence(getNextPending(updated));
     } catch (error) {
@@ -125,9 +161,9 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
     }
   };
 
-  const handleFinish = async (finishAnyway = false) => {
+  const handleFinish = async () => {
     if (!sublot) return;
-    if (queued > 0 && !(finishAnyway && canFinishAnyway)) {
+    if (queued > 0) {
       toast({ title: 'Uploads still pending', description: `${queued} photo${queued === 1 ? '' : 's'} still need to upload. Finish after they are sent.` });
       return;
     }
@@ -148,31 +184,33 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       return;
     }
     try {
-      const result = await exportPhotoBatch(photosForExport);
+      const safeName = `${sublot?.lot_no ?? 'sublot'}-${sublot?.sublot_no ?? ''}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+      const result = await exportPhotoBatch(photosForExport, { filename: `tagging-line-${safeName}.zip` });
       toast({ title: 'Sublot ZIP ready', description: `${result.count} saved photos were included.` });
     } catch (error) {
       toast({ title: 'ZIP export failed', description: error instanceof Error ? error.message : 'Try again.', variant: 'destructive' });
     }
   };
 
-  if (selectedItem && sublot) {
+  if (selectedItem && sublot && cameraOpen) {
     return (
       <CameraView
         onOpenSettings={onOpenSettings}
         connected={{ connection, sublot, item: selectedItem, uploadCounts: { uploaded, queued } }}
         onConnectedSaved={async () => {
-          await refreshSublotLocal(sublot.sublot_id);
-          try {
-            const updated = await getTaggingLineSublot(connection, sublot.sublot_id);
-            setSublot(updated);
-            const next = getNextPending(updated);
-            setSelectedSequence(next);
-          } catch {
-            const remaining = sublot.items.filter((item) => item.status === 'pending' && item.sequence > selectedItem.sequence).sort((a, b) => a.sequence - b.sequence)[0];
-            setSelectedSequence(remaining?.sequence ?? null);
-          }
+          const [nextPhotos, nextJobs] = await Promise.all([
+            getSublotPhotos(sublot.sublot_id),
+            getUploadJobs(sublot.sublot_id),
+          ]);
+          const updated = overlayLocalPhotos(sublot, nextPhotos);
+          setPhotos(nextPhotos);
+          setJobs(nextJobs);
+          setSublot(updated);
+          const next = getNextPending(updated);
+          setSelectedSequence(next);
+          if (next === null) setCameraOpen(false);
         }}
-        onExitConnected={() => setSelectedSequence(null)}
+        onExitConnected={() => setCameraOpen(false)}
       />
     );
   }
@@ -192,7 +230,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
 
         <main className="space-y-4 p-3 pb-safe">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 text-sm">
-            <span>{navigator.onLine ? `Uploaded ${uploaded} · ${pendingJobs} pending` : `Offline — ${pendingJobs} queued`}</span>
+            <span>{isOnline ? `Uploaded ${uploaded} · ${pendingJobs} pending` : `Offline — ${pendingJobs} queued`}</span>
             <Button size="sm" variant="outline" onClick={() => void exportLocalSublot()}><Download className="mr-1 h-4 w-4" />Export sublot ZIP</Button>
           </div>
           {sublot.trays.map((tray) => {
@@ -208,19 +246,41 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
                     if (!item) return <div key={compartment} className="aspect-square rounded border border-dashed border-border" aria-hidden="true" />;
                     const selected = selectedSequence === item.sequence;
                     const holdSkip = () => { void handleSkip(item.sequence); };
-                    let longPressTimer: ReturnType<typeof setTimeout> | undefined;
                     return (
                       <Button
                         key={item.sequence}
                         variant="outline"
                         className={`relative aspect-square h-auto min-w-0 flex-col gap-0.5 rounded-md border px-1 py-1 ${item.status === 'done' ? 'border-primary bg-primary/15' : item.status === 'skipped' ? 'border-muted-foreground bg-muted text-muted-foreground' : 'border-border bg-background'} ${selected ? 'ring-2 ring-primary ring-offset-1' : ''}`}
                         onClick={() => {
+                          const longPress = skipTimers.current.get(item.sequence);
+                          if (longPress?.triggered) {
+                            skipTimers.current.delete(item.sequence);
+                            return;
+                          }
                           if (item.status === 'skipped') return;
                           setSelectedSequence(item.sequence);
                         }}
-                        onPointerDown={() => { longPressTimer = setTimeout(holdSkip, 650); }}
-                        onPointerUp={() => { if (longPressTimer) clearTimeout(longPressTimer); }}
-                        onPointerLeave={() => { if (longPressTimer) clearTimeout(longPressTimer); }}
+                        onPointerDown={() => {
+                          const press = { triggered: false, timer: setTimeout(() => {
+                            press.triggered = true;
+                            holdSkip();
+                          }, 650) };
+                          skipTimers.current.set(item.sequence, press);
+                        }}
+                        onPointerUp={() => {
+                          const press = skipTimers.current.get(item.sequence);
+                          if (press && !press.triggered) {
+                            clearTimeout(press.timer);
+                            skipTimers.current.delete(item.sequence);
+                          }
+                        }}
+                        onPointerLeave={() => {
+                          const press = skipTimers.current.get(item.sequence);
+                          if (press && !press.triggered) {
+                            clearTimeout(press.timer);
+                            skipTimers.current.delete(item.sequence);
+                          }
+                        }}
                         aria-label={`Tray ${tray.tray_code}, compartment ${compartment}, ${item.status}, ${item.pcs} pcs. Hold to skip pending compartment.`}
                       >
                         <span className="text-xs font-semibold">{compartment}</span>
@@ -237,12 +297,11 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           {selectedItem && <div className="sticky bottom-2 space-y-2 border-t border-border bg-background/95 p-3 backdrop-blur">
             <p className="text-center text-sm">Tray {selectedItem.tray_code} · Compartment {selectedItem.compartment_no}</p>
             <p className="truncate text-center font-mono text-xs text-muted-foreground">{selectedItem.filename}</p>
-            <Button className="w-full" onClick={() => setSelectedSequence(selectedItem.sequence)}><Camera className="mr-2 h-4 w-4" />{selectedItem.status === 'done' ? 'Reshoot compartment' : 'Photograph compartment'}</Button>
+            <Button className="w-full" onClick={() => { setSelectedSequence(selectedItem.sequence); setCameraOpen(true); }}><Camera className="mr-2 h-4 w-4" />{selectedItem.status === 'done' ? 'Reshoot compartment' : 'Photograph compartment'}</Button>
           </div>}
           {pendingItem === null && <div className="space-y-2 border-t border-border pt-4">
             {pendingJobs > 0 && <p className="text-sm text-muted-foreground">{pendingJobs} photo upload{pendingJobs === 1 ? '' : 's'} remain queued.</p>}
-            <Button className="w-full" onClick={() => void handleFinish()} disabled={pendingJobs > 0}>Finish sublot</Button>
-            {pendingJobs > 0 && canFinishAnyway && <Button className="w-full" variant="outline" onClick={() => void handleFinish(true)}>Finish anyway (remaining are skipped)</Button>}
+            <Button className="w-full" onClick={() => void handleFinish()} disabled={pendingJobs > 0}>{allRemainingSkipped ? 'Finish anyway (remaining are skipped)' : 'Finish sublot'}</Button>
           </div>}
         </main>
       </div>
@@ -259,9 +318,10 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
       <main className="space-y-3 p-3">
         {!connection.deviceKey || !connection.baseUrl ? <Card><CardContent className="space-y-3 p-4"><p className="text-sm text-muted-foreground">Set the server address and device key to load connected work. Manual photo capture remains available without them.</p><Button onClick={onOpenSettings}>Open connection settings</Button></CardContent></Card> : null}
         {loading ? <p className="py-8 text-center text-sm text-muted-foreground">Loading work queue…</p> : null}
-        {!loading && connection.baseUrl && connection.deviceKey && queue.length === 0 ? <div className="py-10 text-center text-muted-foreground">No sublots in the queue.</div> : null}
-        {queue.map((entry) => <Card key={entry.sublot_id} className="cursor-pointer" onClick={() => void openSublot(entry.sublot_id)}><CardContent className="flex items-center justify-between gap-3 p-4"><div className="min-w-0"><p className="font-semibold">{entry.lot_no} · Sublot {entry.sublot_no}</p><p className="truncate text-sm text-muted-foreground">{entry.product_name}</p><p className="mt-1 text-xs text-muted-foreground">{entry.compcode} · {entry.ic}</p></div><div className="shrink-0 text-right"><p className="font-mono text-sm">{entry.done_count} / {entry.total_items}</p><p className="text-xs text-muted-foreground">done</p></div></CardContent></Card>)}
-        {connection.baseUrl && connection.deviceKey && !navigator.onLine && <p className="flex items-center gap-2 text-xs text-muted-foreground"><WifiOff className="h-4 w-4" />Offline — saved photos will upload when connected.</p>}
+        {!loading && queueError && <Card><CardContent className="space-y-3 p-4"><p className="text-sm text-destructive">{queueError}</p><Button variant="outline" onClick={onBack}>Return to manual camera</Button></CardContent></Card>}
+        {!loading && !queueError && connection.baseUrl && connection.deviceKey && queue.length === 0 ? <div className="py-10 text-center text-muted-foreground">No sublots in the queue.</div> : null}
+        {queue.map((entry) => <Card key={entry.sublot_id} className="cursor-pointer" onClick={() => void openSublot(entry.sublot_id)}><CardContent className="flex items-center justify-between gap-3 p-4"><div className="min-w-0"><p className="font-semibold">{entry.lot_no} · Sublot {entry.sublot_no}</p><p className="truncate text-sm text-muted-foreground">{entry.product_name}</p></div><div className="shrink-0 text-right"><p className="font-mono text-sm">{entry.done_count} / {entry.total_items}</p><p className="text-xs text-muted-foreground">done</p></div></CardContent></Card>)}
+        {connection.baseUrl && connection.deviceKey && !isOnline && <p className="flex items-center gap-2 text-xs text-muted-foreground"><WifiOff className="h-4 w-4" />Offline — saved photos will upload when connected.</p>}
       </main>
     </div>
   );

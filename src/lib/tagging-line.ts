@@ -63,6 +63,9 @@ export function normalizeTaggingLineBaseUrl(value: string): string {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Server URL must begin with http:// or https://');
   }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('Server address cannot include login details, a query, or a fragment.');
+  }
   return parsed.toString().replace(/\/$/, '');
 }
 
@@ -88,10 +91,12 @@ async function apiRequest<T>(
 }
 
 export async function getTaggingLineQueue(connection: TaggingLineConnection): Promise<TaggingLineQueueEntry[]> {
-  const payload = await apiRequest<{ sublots?: TaggingLineQueueEntry[]; queue?: TaggingLineQueueEntry[] } | TaggingLineQueueEntry[]>(connection, '/api/public/photo/queue');
+  const payload = await apiRequest<{ sublots?: TaggingLineQueueEntry[]; queue?: TaggingLineQueueEntry[]; data?: TaggingLineQueueEntry[] } | TaggingLineQueueEntry[]>(connection, '/api/public/photo/queue');
   if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
   if (Array.isArray(payload.sublots)) return payload.sublots;
-  return Array.isArray(payload.queue) ? payload.queue : [];
+  if (Array.isArray(payload.queue)) return payload.queue;
+  return Array.isArray(payload.data) ? payload.data : [];
 }
 
 export async function testTaggingLineConnection(connection: TaggingLineConnection): Promise<number> {
@@ -103,11 +108,14 @@ export async function getTaggingLineSublot(
   connection: TaggingLineConnection,
   sublotId: string
 ): Promise<TaggingLineSublot> {
-  const payload = await apiRequest<TaggingLineSublot | { sublot: TaggingLineSublot }>(
+  const payload = await apiRequest<TaggingLineSublot | { sublot: TaggingLineSublot; data?: TaggingLineSublot } | { data: TaggingLineSublot }>(
     connection,
     `/api/public/photo/sublots/${encodeURIComponent(sublotId)}`
   );
-  return 'sublot' in payload ? payload.sublot : payload;
+  if (!payload || typeof payload !== 'object') throw new Error('The server returned an invalid sublot response.');
+  if ('sublot' in payload) return payload.sublot;
+  if ('data' in payload) return payload.data;
+  return payload;
 }
 
 export async function uploadSublotPhoto(

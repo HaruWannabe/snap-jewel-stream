@@ -6,7 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useCamera } from '@/hooks/useCamera';
-import { getPrefixes, savePhoto, checkFilenameExists, checkExactFilenameExists, saveConnectedPhoto, getTodayCount, PrefixItem, TaggingLineConnection } from '@/lib/storage';
+import { getPrefixes, savePhoto, checkFilenameExists, checkExactFilenameExists, isFilenameOwnedByConnectedItem, saveConnectedPhoto, getTodayCount, PrefixItem, TaggingLineConnection } from '@/lib/storage';
 import type { TaggingLineItem, TaggingLineSublot } from '@/lib/tagging-line';
 import { detectBlur } from '@/lib/blur-detection';
 import { BlurWarningDialog } from './BlurWarningDialog';
@@ -14,6 +14,7 @@ import { DuplicateWarningDialog } from './DuplicateWarningDialog';
 import { PhotoPreviewDialog } from './PhotoPreviewDialog';
 import { PhotoListView } from './PhotoListView';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface CameraViewProps {
   onOpenSettings: () => void;
@@ -29,6 +30,7 @@ interface CameraViewProps {
 }
 
 export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, onConnectedSaved, connected }: CameraViewProps) {
+  const { toast } = useToast();
   const {
     videoRef,
     canvasRef,
@@ -64,6 +66,18 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
   const [blurScore, setBlurScore] = useState(0);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const online = () => setIsOnline(true);
+    const offline = () => setIsOnline(false);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
+    };
+  }, []);
 
   // Initialize
   useEffect(() => {
@@ -91,6 +105,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
   }, [isReady]);
 
   const filename = selectedPrefix && tagNumber ? `${selectedPrefix}${tagNumber}.jpg` : '';
+  const displayFilename = connected?.item.filename ?? filename;
   const canCapture = isReady && (connected ? Boolean(connected.item.filename) : Boolean(selectedPrefix && tagNumber.trim())) && !isCapturing;
 
   const handleVideoTap = (e: React.MouseEvent<HTMLVideoElement>) => {
@@ -110,9 +125,14 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       }
       
       // Check for duplicate first
-      const exists = connected
+      const filenameExists = connected
         ? await checkExactFilenameExists(connected.item.filename)
         : await checkFilenameExists(selectedPrefix, tagNumber);
+      const exists = filenameExists && (!connected || !await isFilenameOwnedByConnectedItem(
+        connected.item.filename,
+        connected.sublot.sublot_id,
+        connected.item.sequence
+      ));
       if (exists) {
         setPendingBlob(blob);
         setDuplicateDialogOpen(true);
@@ -174,7 +194,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
         sublotId: connected.sublot.sublot_id,
         sequence: connected.item.sequence,
         baseUrl: connected.connection.baseUrl,
-        overwrite,
+        overwrite: overwrite || connected.item.status === 'done',
       })
       : await savePhoto(blob, selectedPrefix, tagNumber, overwrite);
     
@@ -202,6 +222,13 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       }, 100);
     } else {
       setIsCapturing(false);
+      if (connected) {
+        toast({
+          title: 'Photo not saved',
+          description: 'This filename belongs to another saved photo on this device. Existing photos were left unchanged.',
+          variant: 'destructive',
+        });
+      }
     }
   };
 
@@ -266,8 +293,8 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       <canvas ref={canvasRef} className="hidden" />
       
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-card border-b border-border">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-card border-b border-border">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           <Camera className="h-5 w-5 text-primary" />
           <span className="font-medium">Today: {todayCount} photos</span>
         </div>
@@ -275,18 +302,17 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
           {connected ? (
             <Button variant="ghost" size="icon" aria-label="Back to tray grid" onClick={onExitConnected}><ArrowLeft className="h-5 w-5" /></Button>
           ) : onOpenConnected ? (
-            <Button variant="outline" size="sm" onClick={onOpenConnected} className="flex items-center gap-1"><Layers className="h-4 w-4" /><span>Work queue</span></Button>
+            <Button variant="outline" size="icon" onClick={onOpenConnected} aria-label="Work queue" title="Work queue"><Layers className="h-4 w-4" /></Button>
           ) : null}
-          {!connected && <>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowPhotoList(true)}
-            className="flex items-center gap-1"
-          >
-            <List className="h-4 w-4" />
-            <span>All Photos</span>
-          </Button>
+          {!connected && <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPhotoList(true)}
+              className="flex items-center gap-1"
+            >
+              <List className="h-4 w-4" />
+              <span className="hidden sm:inline">All Photos</span>
+            </Button>}
           <div className="flex items-center gap-2">
             <Eye className="h-4 w-4 text-muted-foreground" />
             <Label htmlFor="preview-mode" className="text-sm">Preview</Label>
@@ -296,7 +322,6 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
               onCheckedChange={setPreviewEnabled}
             />
           </div>
-          </>}
           <Button variant="ghost" size="icon" onClick={onOpenSettings}>
             <Settings className="h-5 w-5" />
           </Button>
@@ -359,7 +384,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
           <div className="space-y-1 text-center">
             <p className="text-base font-semibold">Tray {connected.item.tray_code} · Compartment {connected.item.compartment_no} · {connected.item.pcs} pcs</p>
             <p className="break-all font-mono text-xs text-muted-foreground">{connected.item.filename}</p>
-            <p className="text-xs text-muted-foreground">{navigator.onLine ? `Uploaded ${connected.uploadCounts.uploaded} · ${connected.uploadCounts.queued} pending` : `Offline — ${connected.uploadCounts.queued} queued`}</p>
+            <p className="text-xs text-muted-foreground">{isOnline ? `Uploaded ${connected.uploadCounts.uploaded} · ${connected.uploadCounts.queued} pending` : `Offline — ${connected.uploadCounts.queued} queued`}</p>
           </div>
         ) : <>
         {/* Prefix toggles */}
@@ -430,7 +455,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       
       <DuplicateWarningDialog
         open={duplicateDialogOpen}
-        filename={filename}
+        filename={displayFilename}
         onConfirm={handleDuplicateConfirm}
         onCancel={handleDuplicateCancel}
       />
@@ -438,7 +463,7 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
       <PhotoPreviewDialog
         open={previewDialogOpen}
         imageBlob={pendingBlob}
-        filename={filename}
+        filename={displayFilename}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
       />

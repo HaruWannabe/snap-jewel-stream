@@ -38,7 +38,6 @@ async function runQueueCycle(): Promise<void> {
     }));
   } finally {
     active = false;
-    window.dispatchEvent(new Event('taggingline:uploads'));
   }
 }
 

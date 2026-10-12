@@ -56,6 +56,7 @@ export async function exportPhotoBatch(
   opts?: {
     batchIndex?: number;
     batchCount?: number;
+    filename?: string;
     onProgress?: (current: number, total: number) => void;
   }
 ): Promise<{ success: boolean; count: number; filename: string }> {
@@ -80,7 +81,7 @@ export async function exportPhotoBatch(
     }
   }
 
-  const filename = buildZipName({
+  const filename = opts?.filename || buildZipName({
     batchIndex: opts?.batchIndex,
     batchCount: opts?.batchCount,
   });

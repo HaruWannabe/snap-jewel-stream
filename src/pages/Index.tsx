@@ -1,18 +1,39 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CameraView } from '@/components/CameraView';
 import { SettingsView } from '@/components/SettingsView';
+import { ConnectedModeView } from '@/components/ConnectedModeView';
 import { InstallPrompt } from '@/components/InstallPrompt';
+import { startUploadQueue } from '@/lib/upload-queue';
 
 const Index = () => {
-  const [showSettings, setShowSettings] = useState(false);
+  const [screen, setScreen] = useState<'camera' | 'settings' | 'connected'>('camera');
+  const [settingsReturn, setSettingsReturn] = useState<'camera' | 'connected'>('camera');
 
-  if (showSettings) {
-    return <SettingsView onBack={() => setShowSettings(false)} />;
+  useEffect(() => startUploadQueue(), []);
+
+  if (screen === 'settings') {
+    return <SettingsView onBack={() => setScreen(settingsReturn)} />;
   }
 
   return (
     <>
-      <CameraView onOpenSettings={() => setShowSettings(true)} />
+      {screen === 'connected' ? (
+        <ConnectedModeView
+          onBack={() => setScreen('camera')}
+          onOpenSettings={() => {
+            setSettingsReturn('connected');
+            setScreen('settings');
+          }}
+        />
+      ) : (
+        <CameraView
+          onOpenSettings={() => {
+            setSettingsReturn('camera');
+            setScreen('settings');
+          }}
+          onOpenConnected={() => setScreen('connected')}
+        />
+      )}
       <InstallPrompt />
     </>
   );
