@@ -6,7 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useCamera } from '@/hooks/useCamera';
-import { getPrefixes, savePhoto, checkFilenameExists, checkExactFilenameExists, isFilenameOwnedByConnectedItem, saveConnectedPhoto, getTodayCount, PrefixItem, TaggingLineConnection } from '@/lib/storage';
+import { getPrefixes, savePhoto, checkFilenameExists, checkExactFilenameExists, isFilenameOwnedByConnectedItem, saveConnectedPhoto, getTodayCount, getSublotPhotos, getPhotoBlob, PrefixItem, TaggingLineConnection } from '@/lib/storage';
 import type { TaggingLineItem, TaggingLineSublot } from '@/lib/tagging-line';
 import { detectBlur } from '@/lib/blur-detection';
 import { BlurWarningDialog } from './BlurWarningDialog';
@@ -15,12 +15,15 @@ import { PhotoPreviewDialog } from './PhotoPreviewDialog';
 import { PhotoListView } from './PhotoListView';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface CameraViewProps {
   onOpenSettings: () => void;
   onOpenConnected?: () => void;
   onExitConnected?: () => void;
   onConnectedSaved?: () => void | Promise<void>;
+  onSelectSequence?: (sequence: number) => void;
   connected?: {
     connection: TaggingLineConnection;
     sublot: TaggingLineSublot;
@@ -29,7 +32,7 @@ interface CameraViewProps {
   };
 }
 
-export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, onConnectedSaved, connected }: CameraViewProps) {
+export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, onConnectedSaved, onSelectSequence, connected }: CameraViewProps) {
   const { toast } = useToast();
   const {
     videoRef,
@@ -66,6 +69,26 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
   const [blurScore, setBlurScore] = useState(0);
+  const [takenOpen, setTakenOpen] = useState(false);
+  const [taken, setTaken] = useState<{ sequence: number; filename: string; tray: string; comp: number; url?: string }[]>([]);
+  const [viewUrl, setViewUrl] = useState<string | null>(null);
+
+  const openTaken = async () => {
+    if (!connected) return;
+    const photos = await getSublotPhotos(connected.sublot.sublot_id);
+    const bySeq = new Map(photos.map((p) => [p.connectedSequence, p]));
+    taken.forEach((t) => t.url && URL.revokeObjectURL(t.url));
+    const rows = await Promise.all(connected.sublot.items
+      .filter((i) => i.status === 'done' || bySeq.has(i.sequence))
+      .sort((a, b) => a.sequence - b.sequence)
+      .map(async (i) => {
+        const photo = bySeq.get(i.sequence);
+        const blob = photo ? await getPhotoBlob(photo.id) : null;
+        return { sequence: i.sequence, filename: i.filename, tray: i.tray_code, comp: i.compartment_no, url: blob ? URL.createObjectURL(blob) : undefined };
+      }));
+    setTaken(rows);
+    setTakenOpen(true);
+  };
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
   useEffect(() => {
@@ -304,7 +327,8 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
         </div>
         <div className="flex items-center gap-2">
           {connected ? (
-            <Button variant="ghost" size="icon" aria-label="Back to tray grid" onClick={onExitConnected}><ArrowLeft className="h-5 w-5" /></Button>
+            <><Button variant="ghost" size="icon" aria-label="Back to tray grid" onClick={onExitConnected}><ArrowLeft className="h-5 w-5" /></Button>
+            <Button variant="outline" size="sm" onClick={() => void openTaken()} className="flex items-center gap-1"><List className="h-4 w-4" /><span>Taken</span></Button></>
           ) : onOpenConnected ? (
             <Button variant="outline" size="icon" onClick={onOpenConnected} aria-label="Work queue" title="Work queue"><Layers className="h-4 w-4" /></Button>
           ) : null}
@@ -464,6 +488,35 @@ export function CameraView({ onOpenSettings, onOpenConnected, onExitConnected, o
         onCancel={handleDuplicateCancel}
       />
       
+      <Dialog open={takenOpen} onOpenChange={setTakenOpen}>
+        <DialogContent className="max-w-[95vw] p-0">
+          <DialogHeader className="p-4 pb-0"><DialogTitle>Taken photos ({taken.length})</DialogTitle></DialogHeader>
+          <ScrollArea className="max-h-[70vh]">
+            <div className="space-y-2 p-4">
+              {taken.length === 0 && <p className="text-sm text-muted-foreground">No photos taken in this sublot yet.</p>}
+              {taken.map((t) => (
+                <div key={t.sequence} className="flex items-center gap-3 rounded-lg border border-border p-2">
+                  <button className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-muted" onClick={() => t.url && setViewUrl(t.url)} aria-label={`View ${t.filename}`}>
+                    {t.url && <img src={t.url} alt={t.filename} className="h-full w-full object-cover" />}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-mono text-sm">{t.filename}</p>
+                    <p className="text-xs text-muted-foreground">Tray {t.tray} · Compartment {t.comp}</p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => { setTakenOpen(false); onSelectSequence?.(t.sequence); }}>Retake</Button>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!viewUrl} onOpenChange={(o) => !o && setViewUrl(null)}>
+        <DialogContent className="max-w-[95vw] p-2">
+          {viewUrl && <img src={viewUrl} alt="Taken photo" className="max-h-[80vh] w-full object-contain" />}
+        </DialogContent>
+      </Dialog>
+
       <PhotoPreviewDialog
         open={previewDialogOpen}
         imageBlob={pendingBlob}

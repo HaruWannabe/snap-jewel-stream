@@ -231,6 +231,7 @@ export function ConnectedModeView({ onBack, onOpenSettings }: ConnectedModeViewP
           if (next === null) setCameraOpen(false);
         }}
         onExitConnected={() => setCameraOpen(false)}
+        onSelectSequence={(seq) => setSelectedSequence(seq)}
       />
     );
   }
